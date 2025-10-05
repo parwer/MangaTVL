@@ -9,10 +9,11 @@ class DetectionResult(BaseModel):
 
 class OCRResult(BaseModel):
     text: str
-    bbox: list[list[int]] # each group of text that got from ocr [[x1, y1, x2, y2], ...]
+    boxes: list[list[int]] # each group of text that got from ocr [[x1, y1, x2, y2], ...]
+    detection_result: DetectionResult
 
     def __post_init__(self):
-        self.bbox = self._parse_bbox(self.bbox, "bbox")
+        self.boxes = self._parse_bbox(self.boxes, "bbox")
 
     @staticmethod
     def _parse_bbox(value, field_name):
