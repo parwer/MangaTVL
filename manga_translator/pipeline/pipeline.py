@@ -105,20 +105,27 @@ class Pipeline:
     
     async def run(self, image_path, process_image=False):
         image = self._load(image_path)
-        
         image_for_translate = None
         if process_image:
             image_for_translate = image
 
         detection_result = self.det_model.detect(image)
-
         ocr_result = self.ocr_engine.get_ocr(image, detection_result)
-
         translation_result = await self._translate(ocr_result, image_for_translate)
-
         inpainted_image = self.inpainter.inpaint(image, translation_result)
-
         rendered_image = self.renderer.render(inpainted_image, translation_result)
-
         return rendered_image
     
+    
+    async def run_batch(self, image_paths: List[str], process_image=False) -> List[Image.Image]:
+        async def process_single(image_path):
+            image = self._load(image_path)
+            image_for_translate = image if process_image else None
+            detection_result = self.det_model.detect(image)
+            ocr_result = self.ocr_engine.get_ocr(image, detection_result)
+            translation_result = await self._translate(ocr_result, image_for_translate)
+            inpainted_image = self.inpainter.inpaint(image, translation_result)
+            return self.renderer.render(inpainted_image, translation_result)
+
+        tasks = [process_single(path) for path in image_paths]
+        return await asyncio.gather(*tasks)
