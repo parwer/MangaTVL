@@ -40,8 +40,6 @@ class TextRenderer:
         text = text.replace(" ", "-")  # Replace spaces with hyphens to preserve them during tokenization
 
         wrap_text, font_size = self.wrap_extraction(draw, text, box)
-        print(wrap_text)
-        print("---"*10)
 
         wrap_text = wrap_text.replace(" ", "")
         wrap_text = wrap_text.replace("-", " ") # Revert hyphens back to spaces for rendering

@@ -7,6 +7,7 @@ from PIL import Image
 from ..utils.common import load_image, resize_image, show_images
 from ..detection.onnx_detection import ONNXDetection
 from ..ocr.paddleocr_engine import PaddleOCREngine
+from ..ocr.easyocr_engine import EasyOCREngine
 from ..inpainting.simple_lama_inpainter import SimpleLamaInpainter
 from ..inpainting.opencv_inpainter import OpenCVInpainter
 from ..rendering.renderer import TextRenderer
@@ -52,7 +53,7 @@ class Pipeline:
         font_path: Optional[str]="../assets/fonts/THSarabunNew.ttf"
     ):
         self.det_model = det_model or ONNXDetection()  # default model path from ONNXDetection
-        self.ocr_engine = ocr_engine or PaddleOCREngine(language="en")
+        self.ocr_engine = ocr_engine or EasyOCREngine(language="en")
         self.provider = provider
         self.model = model
         self.user_prompt = user_prompt
@@ -110,6 +111,9 @@ class Pipeline:
             image_for_translate = image
 
         detection_result = self.det_model.detect(image)
+        if not detection_result:
+            print(f"No text detected in image: {image_path}")
+            return image
         ocr_result = self.ocr_engine.get_ocr(image, detection_result)
         translation_result = await self._translate(ocr_result, image_for_translate)
         inpainted_image = self.inpainter.inpaint(image, translation_result)
@@ -149,6 +153,9 @@ class Pipeline:
             image = self._load(image_path)
             image_for_translate = image if process_image else None
             detection_result = self.det_model.detect(image)
+            if not detection_result:
+                # no text detected, return original image
+                return image
             ocr_result = self.ocr_engine.get_ocr(image, detection_result)
             translation_result = await self._translate(ocr_result, image_for_translate)
             inpainted_image = self.inpainter.inpaint(image, translation_result)
