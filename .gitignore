@@ -227,3 +227,6 @@ images/
 
 *.pt
 *.onnx
+
+.gitignore
+scraping/*

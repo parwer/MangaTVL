@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import asyncio
+import os
 
 from typing import Optional
 
@@ -10,6 +11,7 @@ from .utils.prompt import get_sys_prompt, get_ocr_prompt
 from ..schemas.interface import TranslationResult, OCRResult
 
 
+
 class AsyncTranslatorBase(ABC):
     def __init__(self,
                  client: any,
@@ -17,9 +19,10 @@ class AsyncTranslatorBase(ABC):
                  timeout: int = 60,
                  user_prompt: str="",
                  guidelines: str="",
-                 concurrent_limit: int=1,
+                 concurrent_limit: int=os.getenv("CONCURRENT_REQUESTS"),
                  from_lang: str="English",
-                 to_lang: str="Thai"
+                 to_lang: str="Thai",
+                 max_retries: int=6
                  ):
         self.client = client
         self.model = model
@@ -28,15 +31,22 @@ class AsyncTranslatorBase(ABC):
                                             guidelines=guidelines,
                                             from_lang=from_lang,
                                             to_lang=to_lang)
-        self.semaphore = asyncio.Semaphore(concurrent_limit)
+        self.semaphore = asyncio.Semaphore(int(concurrent_limit))
+        self.max_retries = max_retries
+        self.RATE_LIMIT_FLAGS = asyncio.Event()
     
     async def translate(self, ocr_result: list[OCRResult], image=None):
+        if ocr_result is None or len(ocr_result) == 0:
+            return []
+
         if image is not None:
             image = convert_img_to_base64(image)
 
         processed_inputs = self._preprocess(ocr_result)
         response = await self._translate(processed_inputs, image=image)
+
         response_json = parse_response(response)
+
 
         response_sorted = sorted(response_json, key=lambda x: x['text_no'])
 

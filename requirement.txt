@@ -6,3 +6,4 @@ pydantic
 paddleocr
 torch
 torchvision
+easyocr

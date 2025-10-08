@@ -13,6 +13,10 @@ class InpainterBase(ABC):
         self.device = device
 
     def inpaint(self, image, inputs: list[TranslationResult] | list[OCRResult]):
+        if inputs is None or len(inputs) == 0:
+            print("No inputs provided for inpainting. Returning original image.")
+            return image
+
         inputs = self.parse_inputs(inputs)
         mask = self._masking(image, inputs)
         inpainted_image = self._inpaint(image, mask, inputs=inputs)

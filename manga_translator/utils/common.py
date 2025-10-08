@@ -26,6 +26,9 @@ def xywh2xyxy(box):
 
 
 def combine_bbox(bboxes):
+    if len(bboxes) == 0:
+        return np.array([0, 0, 0, 0])
+
     bboxes = np.array(bboxes)
 
     x_min = np.min(bboxes[:, 0])
@@ -138,7 +141,7 @@ def load_image(image_path) -> Image.Image:
     return img
 
 
-def show_image_with_boxes(image, boxes, cls_text: str=None, fig_size=(10, 10), colors=None):
+def show_image_with_boxes(image, boxes, cls_text: str=None, fig_size=(10, 10), color=None):
     """
         image pattern: PIL, cv2
         bboxes pattern: [[x1, y1, x2, y2], ...]
@@ -150,7 +153,8 @@ def show_image_with_boxes(image, boxes, cls_text: str=None, fig_size=(10, 10), c
 
     for i, (box, cls) in enumerate(zip(boxes, cls_text)):
         x1, y1, x2, y2 = box
-        color = (255, 0, 0)
+        color = (255, 0, 0) if color is None else color
+        
         cv2.rectangle(cv_image, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
         if cls:
             cv2.putText(cv_image, cls, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)

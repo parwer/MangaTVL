@@ -117,7 +117,34 @@ class Pipeline:
         return rendered_image
     
     
-    async def run_batch(self, image_paths: List[str], process_image=False) -> List[Image.Image]:
+    async def run_batch(self, image_paths: List[str], process_image=False, show_progress: bool = True) -> List[Image.Image]:
+        """
+        Process multiple images concurrently and show a tqdm progress bar.
+
+        - image_paths: list of image file paths
+        - process_image: pass the full image to translator if True
+        - show_progress: whether to display a tqdm progress bar (auto-chooses notebook/terminal)
+        """
+
+        # choose proper tqdm for notebook vs terminal
+        try:
+            shell = get_ipython().__class__.__name__  # type: ignore
+            in_notebook = shell == "ZMQInteractiveShell"
+        except Exception:
+            in_notebook = False
+
+        if show_progress:
+            try:
+                if in_notebook:
+                    from tqdm.notebook import tqdm as _tqdm
+                else:
+                    from tqdm import tqdm as _tqdm
+            except Exception:
+                # tqdm not installed -> fallback no progress
+                _tqdm = None
+        else:
+            _tqdm = None
+
         async def process_single(image_path):
             image = self._load(image_path)
             image_for_translate = image if process_image else None
@@ -127,5 +154,19 @@ class Pipeline:
             inpainted_image = self.inpainter.inpaint(image, translation_result)
             return self.renderer.render(inpainted_image, translation_result)
 
+        # create tasks (coroutines)
         tasks = [process_single(path) for path in image_paths]
-        return await asyncio.gather(*tasks)
+
+        results = []
+        if _tqdm is None:
+            # no tqdm -> just gather
+            return await asyncio.gather(*tasks)
+
+        # iterate as tasks complete and update tqdm
+        for fut in _tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Processing"):
+            res = await fut
+            results.append(res)
+
+        # preserve original ordering if desired:
+        # If you want outputs in same order as input use: await asyncio.gather(*tasks) instead.
+        return results

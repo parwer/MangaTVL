@@ -6,13 +6,14 @@ from ..utils.common import cv2pil
 from ..schemas.interface import TranslationResult
 from .extract_text_box import extract_text_box
 from pythainlp import word_tokenize
+import re
 
 class TextRenderer:
     def __init__(self,
                  font_path=None,
                  tokenizer=word_tokenize,
                  max_font_size=100,
-                 min_font_size=16,
+                 min_font_size=18,
                  display_mode="horizontal" # "vertical" or "horizontal" or "mixed"
                  ):
         self.font_path = font_path
@@ -22,6 +23,10 @@ class TextRenderer:
         self.display_mode = display_mode
 
     def render(self, image, inputs: list[TranslationResult]):
+        if inputs is None or len(inputs) == 0:
+            print("No inputs provided for rendering. Returning original image.")
+            return image
+
         image_copy = cv2pil(image.copy())
         draw = ImageDraw.Draw(image_copy)
         for item in inputs:
@@ -35,6 +40,8 @@ class TextRenderer:
         text = text.replace(" ", "-")  # Replace spaces with hyphens to preserve them during tokenization
 
         wrap_text, font_size = self.wrap_extraction(draw, text, box)
+        print(wrap_text)
+        print("---"*10)
 
         wrap_text = wrap_text.replace(" ", "")
         wrap_text = wrap_text.replace("-", " ") # Revert hyphens back to spaces for rendering
@@ -54,8 +61,9 @@ class TextRenderer:
         x = x1 + (box_width - text_width) / 2
         y = y1 + (box_height - text_height) / 2
 
-        draw.multiline_text((x, y), wrap_text, font=font, fill=(0, 0, 0), align='center', stroke_width=1, stroke_fill=(255, 255, 255))
-        print(f"Rendered text in box {box} with font size {font_size}")
+        print(f"Rendering text with font size: {font_size}")
+
+        draw.multiline_text((x, y), wrap_text, font=font, fill=(0, 0, 0), align='center', stroke_width=5, stroke_fill=(255, 255, 255))
         return
         
 
@@ -67,7 +75,7 @@ class TextRenderer:
         low = self.min_font_size
         high = self.max_font_size
         best_font_size = low
-        best_wrap_text = tokenized_text
+        best_wrap_text = None
 
         while low <= high:
             mid = (low + high) // 2
@@ -78,8 +86,21 @@ class TextRenderer:
                 low = mid + 1
             else:
                 high = mid - 1
-
-        return best_wrap_text, best_font_size
+        
+        if best_wrap_text is not None:
+            return best_wrap_text, best_font_size
+        else:
+            wrap_text = ""
+            i = 0
+            token = tokenized_text.split(' ')
+            while i < len(token):
+                wrap_text += token[i]
+                if i % 4 == 0 and i != 0:
+                    wrap_text += "\n"
+                i+=1
+            
+            return wrap_text, self.min_font_size
+                
 
     def _tokenize_text(self, text):
         tokens = self.tokenizer(text, engine="newmm")

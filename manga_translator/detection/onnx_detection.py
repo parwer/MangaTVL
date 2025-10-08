@@ -47,39 +47,115 @@ class ONNXDetection:
 
     def postprocess(self, outputs, conf_threshold=0.6):
         detections = outputs[0]
-        detections  = detections.transpose()
+        # transpose as before (model output shape dependent)
+        detections = detections.transpose()
+
+        # filter detections
         detections_filtered = self.filter_detections(detections, conf_threshold)
+
+        # ensure detections_filtered is a numpy array
+        detections_filtered = np.array(detections_filtered)
+
+        # If there are no detections (empty array), return empty results
+        if detections_filtered.size == 0:
+            return np.empty((0, 5)), np.empty((0,))
+
+        # If a single detection was returned as 1D array, convert to 2D
+        if detections_filtered.ndim == 1:
+            detections_filtered = detections_filtered.reshape(1, -1)
+
         rescaled_boxes, confidences = self.rescale_back(detections_filtered, self.original_width, self.original_height)
         return rescaled_boxes, confidences
 
     def filter_detections(self, detections, conf_threshold=0.6):
-        if len(detections[0]) == 5:
-            considerable_detections = [det for det in detections if det[4] >= conf_threshold]
-            considerable_detections = np.array(considerable_detections)
-            return considerable_detections
-        
-        else:
-            A = []
-            for det in detections:
-                class_id = det[4:].argmax()
-                conf_score = det[4:].max()
+        # detections expected shape: (N, D) where D >= 5
+        # If detections is empty-like, return empty np.array
+        if detections is None:
+            return np.array([])
 
-                new_det = np.append(det[:4], [class_id, conf_score])
+        detections = np.array(detections)
+        if detections.size == 0:
+            return np.array([])
 
-                A.append(new_det)
-            
-            A = np.array(A)
-            considerable_detections = [det for det in A if det[-1] >= conf_threshold]
-            considerable_detections = np.array(considerable_detections)
-            return considerable_detections
+        # handle two common layouts:
+        #  - each detection has 5 values (cx, cy, w, h, conf_or_class)
+        #  - or more than 5 (cx, cy, w, h, class_scores...)
+        # Use robust handling and return 2D array of detections with appended class and conf if needed.
+        try:
+            # If detections is 2D and second dim equals 5
+            if detections.ndim == 2 and detections.shape[1] == 5:
+                considerable = [det for det in detections if det[4] >= conf_threshold]
+                return np.array(considerable)
+            else:
+                # More than 5 dims: infer class id and score from tail
+                A = []
+                for det in detections:
+                    # ensure det is array-like
+                    det = np.array(det)
+                    if det.size < 5:
+                        continue
+                    class_id = int(det[4:].argmax())
+                    conf_score = float(det[4:].max())
+                    new_det = np.append(det[:4], [class_id, conf_score])
+                    A.append(new_det)
+                A = np.array(A)
+                if A.size == 0:
+                    return np.array([])
+                considerable = [det for det in A if det[-1] >= conf_threshold]
+                return np.array(considerable)
+        except Exception:
+            # Fallback: return empty if something unexpected
+            return np.array([])
+
     
     def rescale_back(self, detections_filtered, original_width, original_height):
-        cx, cy, w, h, class_id, conf_score = detections_filtered[:, 0], detections_filtered[:, 1], detections_filtered[:, 2], detections_filtered[:, 3], detections_filtered[:, 4], detections_filtered[:, -1]
-        cx = cx/self.input_size[1] * original_width
-        cy = cy/self.input_size[0] * original_height
-        w = w/self.input_size[1] * original_width
-        h = h/self.input_size[0] * original_height
+        # detections_filtered assumed to be (N, 6) or (N,5) (we expect at least 5 columns)
+        detections_filtered = np.array(detections_filtered)
+        if detections_filtered.size == 0:
+            return np.empty((0, 5)), np.empty((0,))
+
+        if detections_filtered.ndim == 1:
+            detections_filtered = detections_filtered.reshape(1, -1)
+
+        # If only 5 columns (cx, cy, w, h, class_id/conf) we may need to handle arrangement
+        # Ensure there are at least 5 columns; if 5, interpret as cx,cy,w,h,class_id
+        if detections_filtered.shape[1] < 5:
+            # cannot process, return empty
+            return np.empty((0, 5)), np.empty((0,))
+
+        # Support cases where last column is conf_score or class+conf (6 cols)
+        # We'll try to extract class_id from column 4 and conf_score from last column when available
+        if detections_filtered.shape[1] >= 6:
+            cx = detections_filtered[:, 0]
+            cy = detections_filtered[:, 1]
+            w = detections_filtered[:, 2]
+            h = detections_filtered[:, 3]
+            class_id = detections_filtered[:, 4]
+            conf_score = detections_filtered[:, -1]
+        else:
+            # shape == 5: assume [cx, cy, w, h, class_id_or_conf]
+            cx = detections_filtered[:, 0]
+            cy = detections_filtered[:, 1]
+            w = detections_filtered[:, 2]
+            h = detections_filtered[:, 3]
+            # If the fifth column is a float (confidence), we set class_id to 0 and conf_score to that value
+            last_col = detections_filtered[:, 4]
+            # Heuristic: if values in last_col are >1 then probably class id; if <=1 then confidence
+            if np.all(last_col <= 1.0):
+                class_id = np.zeros_like(last_col)
+                conf_score = last_col
+            else:
+                class_id = last_col
+                conf_score = np.ones_like(last_col)
+
+        # Rescale from model input normalized coords to original image size
+        cx = cx / self.input_size[1] * original_width
+        cy = cy / self.input_size[0] * original_height
+        w = w / self.input_size[1] * original_width
+        h = h / self.input_size[0] * original_height
+
         x1, y1, x2, y2 = xywh2xyxy((cx, cy, w, h))
+        # x1,y1,x2,y2 may be arrays already - stack accordingly
         rescaled_boxes = np.column_stack((x1, y1, x2, y2, class_id))
         keep, keep_conf = self.MNS(rescaled_boxes, conf_score)
         return keep, keep_conf
