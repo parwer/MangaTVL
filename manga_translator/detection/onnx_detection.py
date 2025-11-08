@@ -7,7 +7,7 @@ from ..utils.common import pil2cv, xywh2xyxy
 from ..schemas.interface import DetectionResult
 
 class ONNXDetection:
-    def __init__(self, model_path: str = "../checkpoints/best5000.onnx"):
+    def __init__(self, model_path: str = "/home/parwer/MangaTVL/manga_translator/checkpoints/best5000.onnx"):
         self.session = ort.InferenceSession(model_path)
         self.input_name = self.session.get_inputs()[0].name
         self.input_shape = self.session.get_inputs()[0].shape

@@ -49,10 +49,13 @@ def parse_response(content, debug=False):
             break
 
     if parsed is None:
+        print("Failed to parse response as JSON or YAML.")
         print(content)
-        raise TypeError("Failed to parse response as JSON or YAML.")
+        return []
 
     if not isinstance(parsed, (dict, list)):
-        raise TypeError(f"Parsed content is not a dict or list: {type(parsed)}")
+        print("Parsed content is not a dict or list:")
+        print(parsed)
+        return []
 
     return parsed

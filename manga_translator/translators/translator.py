@@ -10,7 +10,8 @@ from .utils.prompt import get_sys_prompt, get_ocr_prompt
 
 from ..schemas.interface import TranslationResult, OCRResult
 
-
+from dotenv import load_dotenv
+load_dotenv()
 
 class AsyncTranslatorBase(ABC):
     def __init__(self,
@@ -41,25 +42,27 @@ class AsyncTranslatorBase(ABC):
 
         if image is not None:
             image = convert_img_to_base64(image)
+        try:
+            processed_inputs = self._preprocess(ocr_result)
+            response = await self._translate(processed_inputs, image=image)
 
-        processed_inputs = self._preprocess(ocr_result)
-        response = await self._translate(processed_inputs, image=image)
-
-        response_json = parse_response(response)
+            response_json = parse_response(response)
 
 
-        response_sorted = sorted(response_json, key=lambda x: x['text_no'])
+            response_sorted = sorted(response_json, key=lambda x: x['text_no'])
 
-        translation_results = []
+            translation_results = []
 
-        for ocr_item, res_item in zip(ocr_result, response_sorted):
-            translation_result = TranslationResult(
-                ocr_result=ocr_item,
-                translated_text=res_item['translated_text'],
-            )
-            translation_results.append(translation_result)
+            for ocr_item, res_item in zip(ocr_result, response_sorted):
+                translation_result = TranslationResult(
+                    ocr_result=ocr_item,
+                    translated_text=res_item['translated_text'],
+                )
+                translation_results.append(translation_result)
 
-        return translation_results
+            return translation_results
+        except Exception as e:
+            return []
 
     def _preprocess(self, inputs: list[OCRResult]) -> str:
         user_prompt = ""

@@ -9,8 +9,9 @@ from ..utils.common import cv2pil, pil2cv
 from ..schemas.interface import OCRResult, TranslationResult
 
 class InpainterBase(ABC):
-    def __init__(self, device="cpu"):
+    def __init__(self, device="cpu", show_log=False):
         self.device = device
+        self.show_log = show_log
 
     def inpaint(self, image, inputs: list[TranslationResult] | list[OCRResult]):
         if inputs is None or len(inputs) == 0:
@@ -27,7 +28,8 @@ class InpainterBase(ABC):
         if isinstance(inputs, list) and all(isinstance(item, TranslationResult) for item in inputs):
             tmp_inputs = [item.ocr_result for item in inputs]
             inputs = tmp_inputs
-            print("Converted TranslationResult to OCRResult for inpainting.")
+            if self.show_log:
+                print("Converted TranslationResult to OCRResult for inpainting.")
         return inputs
 
     def _masking(self, image, inputs: list[OCRResult], expand_margin=2) -> np.ndarray:
@@ -58,6 +60,12 @@ class InpainterBase(ABC):
         ax[1].axis('off')
         plt.show()
     
+    def get_masks(self, image, inputs: list[OCRResult], expand_margin=2) -> Image.Image:
+        image = pil2cv(image)
+        inputs = self.parse_inputs(inputs)
+        mask = self._masking(image, inputs, expand_margin=expand_margin)
+        return cv2pil(mask)
+
     def expand_box(self, box, image_shape, expand_margin=2):
         x1, y1, x2, y2 = box
         h, w = image_shape[:2]

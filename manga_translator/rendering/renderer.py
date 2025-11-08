@@ -10,7 +10,7 @@ import re
 
 class TextRenderer:
     def __init__(self,
-                 font_path=None,
+                 font_path="/home/parwer/MangaTVL/manga_translator/assets/fonts/THSarabunNew.ttf",
                  tokenizer=word_tokenize,
                  max_font_size=100,
                  min_font_size=18,
@@ -32,18 +32,23 @@ class TextRenderer:
         for item in inputs:
             text = item.translated_text if item.translated_text else item.ocr_result.text
             box = extract_text_box(image_copy, item)
-            self._render_single(draw, text, box)
+            det_box = item.ocr_result.detection_result.bbox
+            self._render_single(draw, text, box, det_box)
         
         return image_copy
 
-    def _render_single(self, draw, text, box):
+    def _render_single(self, draw, text, box, det_box):
         text = text.replace(" ", "-")  # Replace spaces with hyphens to preserve them during tokenization
 
-        wrap_text, font_size = self.wrap_extraction(draw, text, box)
+        wrap_text, font_size = self.wrap_extraction(draw, text, box, det_box)
 
         wrap_text = wrap_text.replace(" ", "")
         wrap_text = wrap_text.replace("-", " ") # Revert hyphens back to spaces for rendering
-        font = ImageFont.truetype(self.font_path, font_size) if self.font_path else ImageFont.load_default()
+        try:
+            font = ImageFont.truetype(self.font_path, font_size)
+        except Exception:
+            print(f"Failed to load font from {self.font_path}. Using default font.")
+            font = ImageFont.load_default()
 
         try:
             text_bbox = draw.multiline_textbbox((0, 0), wrap_text, font=font, align='center')
@@ -59,13 +64,11 @@ class TextRenderer:
         x = x1 + (box_width - text_width) / 2
         y = y1 + (box_height - text_height) / 2
 
-        print(f"Rendering text with font size: {font_size}")
-
         draw.multiline_text((x, y), wrap_text, font=font, fill=(0, 0, 0), align='center', stroke_width=5, stroke_fill=(255, 255, 255))
         return
         
 
-    def wrap_extraction(self, draw, text, box):
+    def wrap_extraction(self, draw, text, box, det_box):
         target_width = box[2] - box[0]
         target_height = box[3] - box[1]
         tokenized_text = self._tokenize_text(text)
@@ -77,7 +80,7 @@ class TextRenderer:
 
         while low <= high:
             mid = (low + high) // 2
-            fits, wrap_text = self._fits_in_box(draw, mid, tokenized_text, target_width, target_height)
+            fits, wrap_text = self._fits_in_box(draw, mid, tokenized_text, target_width, target_height, det_box)
             if fits:
                 best_font_size = mid
                 best_wrap_text = wrap_text
@@ -105,7 +108,7 @@ class TextRenderer:
         tokenized_text = " ".join(tokens)
         return tokenized_text
 
-    def _fits_in_box(self, draw, font_size, tokenized_text, target_width, target_height):
+    def _fits_in_box(self, draw, font_size, tokenized_text, target_width, target_height, det_box):
         try:
             font = ImageFont.truetype(self.font_path, font_size) if self.font_path else ImageFont.load_default()
         except Exception:
@@ -133,3 +136,5 @@ class TextRenderer:
             wrap_width -= 1
 
         return False, None
+    
+    

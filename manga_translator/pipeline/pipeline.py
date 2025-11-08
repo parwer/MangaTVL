@@ -1,10 +1,11 @@
 import asyncio
 from typing import Optional, Any, Dict, List
 import os
+from tqdm.asyncio import tqdm_asyncio
 
 from PIL import Image
 
-from ..utils.common import load_image, resize_image, show_images
+from ..utils.common import cv2pil, load_image, resize_image, show_images
 from ..detection.onnx_detection import ONNXDetection
 from ..ocr.paddleocr_engine import PaddleOCREngine
 from ..ocr.easyocr_engine import EasyOCREngine
@@ -19,6 +20,10 @@ from ..translators.openrouter import AsyncOpenRouterTranslator
 from google import genai
 from openai import AsyncOpenAI
 from groq import AsyncGroq
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class Pipeline:
     """
@@ -48,12 +53,12 @@ class Pipeline:
         to_lang: Optional[str] = "thai",
         inpainter: Optional[SimpleLamaInpainter] = None,
         renderer: Optional[TextRenderer] = None,
-        resize_max: Optional[int] = 512,
+        resize_max: Optional[int] = 256,
         device: Optional[str]="cpu",
-        font_path: Optional[str]="../assets/fonts/THSarabunNew.ttf"
+        font_path: Optional[str]="/home/parwer/MangaTVL/manga_translator/assets/fonts/THSarabunNew.ttf"
     ):
         self.det_model = det_model or ONNXDetection()  # default model path from ONNXDetection
-        self.ocr_engine = ocr_engine or EasyOCREngine(language="en")
+        self.ocr_engine = ocr_engine or EasyOCREngine(language="en", device=device)  # default to English
         self.provider = provider
         self.model = model
         self.user_prompt = user_prompt
@@ -105,16 +110,29 @@ class Pipeline:
                                                image=image_for_translate)
     
     async def run(self, image_path, process_image=False):
-        image = self._load(image_path)
+        """
+        Process a single image end-to-end.
+        - image_path: path to the image file
+        - process_image: pass the full image to translator if True
+        Returns the final rendered image (PIL.Image).
+        """
+        try:
+            image = self._load(image_path)
+        except Exception as e:
+            print(f"Error loading image {image_path}: {e}")
+            return None
+
         image_for_translate = None
         if process_image:
             image_for_translate = image
 
         detection_result = self.det_model.detect(image)
         if not detection_result:
-            print(f"No text detected in image: {image_path}")
+            # print(f"No text detected in image: {image_path}")
             return image
         ocr_result = self.ocr_engine.get_ocr(image, detection_result)
+        image_for_translate = self.resize_image(image_for_translate, max_size=self.resize_max) if image_for_translate else None # resize for faster translation if needed
+        print("image size for translation:", image_for_translate.size if image_for_translate else "N/A")
         translation_result = await self._translate(ocr_result, image_for_translate)
         inpainted_image = self.inpainter.inpaint(image, translation_result)
         rendered_image = self.renderer.render(inpainted_image, translation_result)
@@ -150,14 +168,20 @@ class Pipeline:
             _tqdm = None
 
         async def process_single(image_path):
-            image = self._load(image_path)
+            try:
+                image = self._load(image_path)
+            except Exception as e:
+                print(f"Error loading image {image_path}: {e}")
+                return None
+
             image_for_translate = image if process_image else None
             detection_result = self.det_model.detect(image)
             if not detection_result:
                 # no text detected, return original image
                 return image
             ocr_result = self.ocr_engine.get_ocr(image, detection_result)
-            translation_result = await self._translate(ocr_result, image_for_translate)
+            resized_image = self.resize_image(image=image, max_size=self.resize_max) if image_for_translate else None  # resize for faster translation if needed
+            translation_result = await self._translate(ocr_result, resized_image)
             inpainted_image = self.inpainter.inpaint(image, translation_result)
             return self.renderer.render(inpainted_image, translation_result)
 
@@ -170,10 +194,19 @@ class Pipeline:
             return await asyncio.gather(*tasks)
 
         # iterate as tasks complete and update tqdm
-        for fut in _tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Processing"):
-            res = await fut
-            results.append(res)
-
+        results = await tqdm_asyncio.gather(*tasks, desc="Processing")
         # preserve original ordering if desired:
         # If you want outputs in same order as input use: await asyncio.gather(*tasks) instead.
         return results
+
+    def resize_image(self, image, max_size=1024):
+        width, height = image.size
+        if max(width, height) <= max_size:
+            return image
+        if width > height:
+            new_width = max_size
+            new_height = int(height * (max_size / width))
+        else:
+            new_height = max_size
+            new_width = int(width * (max_size / height))
+        return cv2pil(image.resize((new_width, new_height)))
