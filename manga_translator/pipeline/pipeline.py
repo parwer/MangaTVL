@@ -26,21 +26,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Pipeline:
-    """
-    End-to-end pipeline:
-      - detection (ONNXDetection)
-      - OCR (PaddleOCREngine)
-      - provider for translation (async, e.g. gemini, openrouter, groq)
-      - model for translation (e.g. gemini-2.5-flash, moonshotai/kimi-k2-instruct, )
-      - inpainting (InpainterBase)
-      - rendering (TextRenderer)
-
-    Usage:
-      pipeline = Pipeline(...)
-      result = pipeline.run()
-      # result is a dict with detection/ocr/translation/inpainted/rendered...
-    """
-
     def __init__(
         self,
         det_model: Optional[ONNXDetection] = None,
@@ -110,12 +95,6 @@ class Pipeline:
                                                image=image_for_translate)
     
     async def run(self, image_path, process_image=False):
-        """
-        Process a single image end-to-end.
-        - image_path: path to the image file
-        - process_image: pass the full image to translator if True
-        Returns the final rendered image (PIL.Image).
-        """
         try:
             image = self._load(image_path)
         except Exception as e:
@@ -185,7 +164,7 @@ class Pipeline:
             inpainted_image = self.inpainter.inpaint(image, translation_result)
             return self.renderer.render(inpainted_image, translation_result)
 
-        # create tasks (coroutines)
+        # create tasks
         tasks = [process_single(path) for path in image_paths]
 
         results = []
@@ -195,8 +174,6 @@ class Pipeline:
 
         # iterate as tasks complete and update tqdm
         results = await tqdm_asyncio.gather(*tasks, desc="Processing")
-        # preserve original ordering if desired:
-        # If you want outputs in same order as input use: await asyncio.gather(*tasks) instead.
         return results
 
     def resize_image(self, image, max_size=1024):
