@@ -159,25 +159,25 @@ def cv2pil(img):
     return pil_image
 
 
-def convert_img_to_base64(image):
+def convert_img_to_base64(image, quality=60):
     pattern = img_pattern(image)
-    
+
     if pattern == 'base64':
         return image
-    
+
     elif pattern == 'pil':
         buffered = BytesIO()
-        image.save(buffered, format="JPEG")
+        image.save(buffered, format="JPEG", quality=quality)
         b64_string = base64.b64encode(buffered.getvalue()).decode('utf-8')
         return f"data:image/jpeg;base64,{b64_string}"
-    
+
     elif pattern == 'cv2':
         pil_image = cv2pil(image)
         buffered = BytesIO()
-        pil_image.save(buffered, format="JPEG")
+        pil_image.save(buffered, format="JPEG", quality=quality)
         b64_string = base64.b64encode(buffered.getvalue()).decode('utf-8')
         return f"data:image/jpeg;base64,{b64_string}"
-    
+
     else:
         raise ValueError("Invalid image type")
 

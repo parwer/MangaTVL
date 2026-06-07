@@ -1,4 +1,4 @@
-from manga_translator.pipeline.pipeline import Pipeline
+from pipeline import Pipeline
 from manga_translator.utils.common import convert_img_to_base64
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
