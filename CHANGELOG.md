@@ -4,6 +4,20 @@
 
 ---
 
+## [2026-06-07 20:58] เขียน README.md (ภาษาอังกฤษ)
+
+**ประเภท:** เพิ่ม feature (เอกสาร)
+
+**รายละเอียด:**
+- เดิม `README.md` ว่างเปล่า (1 บรรทัด) → เขียนใหม่เป็นภาษาอังกฤษตามที่ผู้ใช้ขอ
+- ครอบคลุม: overview + diagram 5 สเตจ (detection/OCR/translation/inpainting/rendering), ตาราง tech stack, requirements (Python 3.12 embedded interpreter, model weights, Thai font, provider key), installation (requirement.txt + deps ที่ขาด), configuration (.env, หมายเหตุ Gemini ใช้ `GOOGLE_API_KEY`), การรัน `uvicorn main:app` + `POST /translate/`, ตัวอย่างใช้ `Pipeline` ตรง (import จาก root `pipeline.py` + `YoloDetection(task="segment")`), project layout, การรัน pytest, notes
+- เขียนให้ตรงสภาพปัจจุบันหลัง refactor ทั้ง session: `pipeline.py` ที่ root, polygon-aware, รูปส่งเป็น multimodal part, fallback ต้นฉบับเมื่อแปล fail
+
+**ไฟล์ที่แก้ไข:**
+- `README.md` — เขียนเนื้อหาทั้งหมด (เดิมว่าง)
+
+---
+
 ## [2026-06-07 20:42] ลบ manga_translator/tests/ (standalone scripts เก่า)
 
 **ประเภท:** ลบ
