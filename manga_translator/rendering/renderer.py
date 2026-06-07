@@ -10,7 +10,7 @@ import re
 
 class TextRenderer:
     def __init__(self,
-                 font_path="/home/parwer/MangaTVL/manga_translator/assets/fonts/THSarabunNew.ttf",
+                 font_path="../assets/fonts/THSarabunNew.ttf",
                  tokenizer=word_tokenize,
                  max_font_size=100,
                  min_font_size=18,

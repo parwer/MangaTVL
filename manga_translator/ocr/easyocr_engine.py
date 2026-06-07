@@ -6,6 +6,10 @@ from ..utils.common import pil2cv
 import easyocr
 import numpy as np
 
+"""
+No Longer Used - This file is a placeholder for potential future EasyOCR-based OCR implementation.
+"""
+
 class EasyOCREngine(OCREngine):
     def __init__(self, language: str, device: str = "cpu"):
         super().__init__(backend="easyocr")

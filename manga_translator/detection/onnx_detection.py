@@ -6,8 +6,12 @@ import cv2
 from ..utils.common import pil2cv, xywh2xyxy
 from ..schemas.interface import DetectionResult
 
+"""
+No Longer Used - This file is a placeholder for potential future ONNX-based detection implementation.
+"""
+
 class ONNXDetection:
-    def __init__(self, model_path: str = "/home/parwer/MangaTVL/manga_translator/checkpoints/best5000.onnx"):
+    def __init__(self, model_path: str = ""):
         self.session = ort.InferenceSession(model_path)
         self.input_name = self.session.get_inputs()[0].name
         self.input_shape = self.session.get_inputs()[0].shape
