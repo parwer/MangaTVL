@@ -39,6 +39,92 @@ def combine_bbox(bboxes):
     return np.array([x_min, y_min, x_max, y_max])
 
 
+def inset_bbox(bbox, pad):
+    """Shrink a bbox inward by `pad` pixels on each side.
+    Returns (x1, y1, x2, y2) or None if the result would be degenerate."""
+    x1, y1, x2, y2 = bbox
+    x1, y1 = int(x1) + pad, int(y1) + pad
+    x2, y2 = int(x2) - pad, int(y2) - pad
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return (x1, y1, x2, y2)
+
+
+def inscribed_rect(polygon, image_shape, padding=0):
+    """Largest axis-aligned rectangle that fits entirely inside `polygon`.
+
+    polygon: list/ndarray of [x, y] points (one polygon)
+    image_shape: (h, w) of the source image — used to clip the polygon bbox
+    padding: pixels to erode inward (e.g. for stroke + safety margin)
+
+    Returns (x1, y1, x2, y2) in source-image coords, or None if no valid rect remains.
+    """
+    if polygon is None or len(polygon) < 3:
+        return None
+
+    pts = np.asarray(polygon, dtype=np.int32).reshape(-1, 2)
+    img_h, img_w = image_shape[:2]
+
+    px1 = max(0, int(pts[:, 0].min()))
+    py1 = max(0, int(pts[:, 1].min()))
+    px2 = min(img_w, int(pts[:, 0].max()) + 1)
+    py2 = min(img_h, int(pts[:, 1].max()) + 1)
+    bw, bh = px2 - px1, py2 - py1
+    if bw <= 0 or bh <= 0:
+        return None
+
+    # Downsample large bubbles to bound work — accuracy loss is absorbed by `padding`.
+    max_side = 200
+    scale = max(1.0, max(bw, bh) / max_side)
+    rw = max(1, int(round(bw / scale)))
+    rh = max(1, int(round(bh / scale)))
+
+    pts_local = pts.copy()
+    pts_local[:, 0] = ((pts_local[:, 0] - px1) / scale).round().astype(np.int32)
+    pts_local[:, 1] = ((pts_local[:, 1] - py1) / scale).round().astype(np.int32)
+
+    mask = np.zeros((rh, rw), dtype=np.uint8)
+    cv2.fillPoly(mask, [pts_local.reshape(-1, 1, 2)], 255)
+
+    if padding > 0:
+        k = max(1, int(round(padding / scale)))
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2 * k + 1, 2 * k + 1))
+        mask = cv2.erode(mask, kernel)
+
+    if not mask.any():
+        return None
+
+    binary = (mask > 0).astype(np.int32)
+    heights = np.zeros(rw, dtype=np.int32)
+    best_area = 0
+    best = (0, 0, 0, 0)
+
+    for y in range(rh):
+        heights = np.where(binary[y] > 0, heights + 1, 0)
+        stack = []
+        for x in range(rw + 1):
+            h = int(heights[x]) if x < rw else 0
+            start = x
+            while stack and stack[-1][1] > h:
+                sx, sh = stack.pop()
+                area = sh * (x - sx)
+                if area > best_area:
+                    best_area = area
+                    best = (sx, y - sh + 1, x - 1, y)
+                start = sx
+            stack.append((start, h))
+
+    if best_area == 0:
+        return None
+
+    rx1, ry1, rx2, ry2 = best
+    x1 = int(round(rx1 * scale)) + px1
+    y1 = int(round(ry1 * scale)) + py1
+    x2 = int(round((rx2 + 1) * scale)) + px1
+    y2 = int(round((ry2 + 1) * scale)) + py1
+    return (x1, y1, x2, y2)
+
+
 def refine_unit_value_type(value) -> list[int]:
     if isinstance(value, str):
         try:
