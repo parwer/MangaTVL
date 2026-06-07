@@ -165,6 +165,34 @@ def show_image_with_boxes(image, boxes, cls_text: str=None, fig_size=(10, 10), c
     plt.show()
 
 
+def show_image_with_polygons(image, polygons, cls_text=None, fig_size=(10, 10), color=None):
+    """
+        image pattern: PIL, cv2
+        polygons pattern: [[[x1, y1], [x2, y2], ...], ...]
+        Each polygon is a list of [x, y] points. None / empty polygons are skipped
+        (handy when some DetectionResult.segmentation is None from a detect-only model).
+    """
+    cv_image = pil2cv(image).copy()
+    if cls_text is None:
+        cls_text = ["" for _ in range(len(polygons))]
+
+    c = (255, 0, 0) if color is None else color
+    for poly, cls in zip(polygons, cls_text):
+        if poly is None or len(poly) == 0:
+            continue
+        pts = np.array(poly, dtype=np.int32).reshape(-1, 1, 2)
+        cv2.polylines(cv_image, [pts], isClosed=True, color=c, thickness=2)
+        if cls:
+            x, y = int(poly[0][0]), int(poly[0][1])
+            cv2.putText(cv_image, cls, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, c, 2)
+
+    pil_image = cv2pil(cv_image)
+    plt.figure(figsize=fig_size)
+    plt.imshow(pil_image)
+    plt.axis('off')
+    plt.show()
+
+
 def show_images(images, titles=None, figsize=(15, 5), vertical=False):
     n = len(images)
     plt.figure(figsize=figsize)

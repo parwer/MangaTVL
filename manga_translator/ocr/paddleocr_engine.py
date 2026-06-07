@@ -10,7 +10,11 @@ class PaddleOCREngine(OCREngine):
     def __init__(self, language: str):
         super().__init__(backend="paddleocr")
 
-        self.ocr_model = PaddleOCR(use_angle_cls=True, lang=language,)
+        # enable_mkldnn=False: Paddle 3.3's PIR executor crashes inside the
+        # oneDNN/MKLDNN CPU backend during text detection
+        # (NotImplementedError: ConvertPirAttribute2RuntimeAttribute ... onednn).
+        # Disabling MKLDNN falls back to the plain CPU kernels.
+        self.ocr_model = PaddleOCR(use_angle_cls=True, lang=language, enable_mkldnn=False)
         self.device = "GPU" if paddle.is_compiled_with_cuda() else "CPU"
 
         print(f"PaddleOCR initialized with language: {language} on {self.device}")
@@ -25,7 +29,7 @@ class PaddleOCREngine(OCREngine):
         for item in result:
             texts.extend(item["rec_texts"])
             boxes.extend(item["rec_boxes"])
-        
+
         text = " ".join([i for i in texts])
         return text, boxes
 
@@ -33,7 +37,9 @@ class PaddleOCREngine(OCREngine):
         ocr_results = []
         for det in detection_results:
             x1, y1, x2, y2 = det.bbox
+            poly = det.segmentation
             cropped_img = image.crop((x1, y1, x2, y2))
+            cropped_img = self.clean_poly(cropped_img, poly, offset=(x1, y1))
             text, boxes = self.ocr(cropped_img)
 
             mapped_boxes = []
