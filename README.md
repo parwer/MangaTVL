@@ -80,7 +80,6 @@ CONCURRENT_REQUESTS=4       # max concurrent LLM calls
 ## Running the API
 
 ```powershell
-# from D:\WorkSpace\MangaTVL
 ..\MangaTVL_ENV\python.exe -m uvicorn main:app --reload
 ```
 
