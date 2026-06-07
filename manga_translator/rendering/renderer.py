@@ -1,16 +1,27 @@
 import textwrap
 from PIL import Image, ImageDraw, ImageFont
+from pathlib import Path
 
-from ..utils.common import cv2pil
+from ..utils.common import cv2pil, inscribed_rect, inset_bbox
 
 from ..schemas.interface import TranslationResult
 from .extract_text_box import extract_text_box
 from pythainlp import word_tokenize
 import re
 
+DEFAULT_FONT_PATH = Path(__file__).resolve().parent.parent / "assets" / "fonts" / "THSarabunNew.ttf"
+
+ABSOLUTE_MIN_FONT_SIZE = 10
+ELLIPSIS = "…"
+
+
+def _stroke_for_font(font_size):
+    return max(1, font_size // 12)
+
+
 class TextRenderer:
     def __init__(self,
-                 font_path="../assets/fonts/THSarabunNew.ttf",
+                 font_path=DEFAULT_FONT_PATH,
                  tokenizer=word_tokenize,
                  max_font_size=100,
                  min_font_size=18,
@@ -29,13 +40,28 @@ class TextRenderer:
 
         image_copy = cv2pil(image.copy())
         draw = ImageDraw.Draw(image_copy)
+        w, h = image_copy.size
+        # Inset by the max possible stroke so the largest font's stroke can't poke out of the bubble.
+        pad = _stroke_for_font(self.max_font_size) + 2
+
         for item in inputs:
             text = item.translated_text if item.translated_text else item.ocr_result.text
-            box = extract_text_box(image_copy, item)
-            det_box = item.ocr_result.detection_result.bbox
-            self._render_single(draw, text, box, det_box)
-        
+            det = item.ocr_result.detection_result
+            box = self._compute_box(det, (h, w), pad) or tuple(int(v) for v in extract_text_box(image_copy, item))
+            self._render_single(draw, text, box, det.bbox)
+
         return image_copy
+
+    def _compute_box(self, det, image_shape, pad):
+        """Render area priority: polygon LIR → det.bbox inset → None (caller falls back)."""
+        poly = getattr(det, "segmentation", None)
+        if poly:
+            rect = inscribed_rect(poly, image_shape, padding=pad)
+            if rect is not None:
+                return rect
+        if det.bbox:
+            return inset_bbox(det.bbox, pad)
+        return None
 
     def _render_single(self, draw, text, box, det_box):
         text = text.replace(" ", "-")  # Replace spaces with hyphens to preserve them during tokenization
@@ -50,8 +76,9 @@ class TextRenderer:
             print(f"Failed to load font from {self.font_path}. Using default font.")
             font = ImageFont.load_default()
 
+        stroke = _stroke_for_font(font_size)
         try:
-            text_bbox = draw.multiline_textbbox((0, 0), wrap_text, font=font, align='center')
+            text_bbox = draw.multiline_textbbox((0, 0), wrap_text, font=font, align='center', stroke_width=stroke)
             text_width = text_bbox[2] - text_bbox[0]
             text_height = text_bbox[3] - text_bbox[1]
         except Exception:
@@ -64,9 +91,10 @@ class TextRenderer:
         x = x1 + (box_width - text_width) / 2
         y = y1 + (box_height - text_height) / 2
 
-        draw.multiline_text((x, y), wrap_text, font=font, fill=(0, 0, 0), align='center', stroke_width=5, stroke_fill=(255, 255, 255))
+        draw.multiline_text((x, y), wrap_text, font=font, fill=(0, 0, 0), align='center',
+                            stroke_width=stroke, stroke_fill=(255, 255, 255))
         return
-        
+
 
     def wrap_extraction(self, draw, text, box, det_box):
         target_width = box[2] - box[0]
@@ -87,21 +115,21 @@ class TextRenderer:
                 low = mid + 1
             else:
                 high = mid - 1
-        
+
         if best_wrap_text is not None:
             return best_wrap_text, best_font_size
-        else:
-            wrap_text = ""
-            i = 0
-            token = tokenized_text.split(' ')
-            while i < len(token):
-                wrap_text += token[i]
-                if i % 4 == 0 and i != 0:
-                    wrap_text += "\n"
-                i+=1
-            
-            return wrap_text, self.min_font_size
-                
+
+        # Fallback 1: shrink below min_font_size before giving up.
+        for fs in range(self.min_font_size - 1, ABSOLUTE_MIN_FONT_SIZE - 1, -1):
+            fits, wrap_text = self._fits_in_box(draw, fs, tokenized_text, target_width, target_height, det_box)
+            if fits:
+                return wrap_text, fs
+
+        # Fallback 2: truncate with ellipsis at absolute min — guarantees no overflow.
+        truncated = self._truncate_to_fit(draw, tokenized_text, target_width, target_height,
+                                          ABSOLUTE_MIN_FONT_SIZE, det_box)
+        return truncated, ABSOLUTE_MIN_FONT_SIZE
+
 
     def _tokenize_text(self, text):
         tokens = self.tokenizer(text, engine="newmm")
@@ -112,11 +140,9 @@ class TextRenderer:
         try:
             font = ImageFont.truetype(self.font_path, font_size) if self.font_path else ImageFont.load_default()
         except Exception:
-            try:
-                font = ImageFont.truetype(self.font_path, font_size)
-            except Exception:
-                font = ImageFont.load_default()
+            font = ImageFont.load_default()
 
+        stroke = _stroke_for_font(font_size)
         wrap_width = len(tokenized_text)
 
         while wrap_width > 0:
@@ -124,17 +150,33 @@ class TextRenderer:
             wrap_text = "\n".join(wrap_lines)
 
             try:
-                text_bbox = draw.multiline_textbbox((0, 0), wrap_text, font=font, align='center')
+                text_bbox = draw.multiline_textbbox((0, 0), wrap_text, font=font, align='center', stroke_width=stroke)
                 text_width = text_bbox[2] - text_bbox[0]
                 text_height = text_bbox[3] - text_bbox[1]
             except Exception:
                 text_width, text_height = draw.multiline_textsize(wrap_text, font=font)
-            
+
             if text_width <= target_width and text_height <= target_height:
                 return True, wrap_text
-            
+
             wrap_width -= 1
 
         return False, None
-    
-    
+
+    def _truncate_to_fit(self, draw, tokenized_text, target_width, target_height, font_size, det_box):
+        tokens = [t for t in tokenized_text.split(' ') if t]
+        if not tokens:
+            return ELLIPSIS
+
+        lo, hi = 1, len(tokens)
+        best = None
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            candidate = " ".join(tokens[:mid]) + " " + ELLIPSIS
+            fits, wrap_text = self._fits_in_box(draw, font_size, candidate, target_width, target_height, det_box)
+            if fits:
+                best = wrap_text
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return best if best is not None else ELLIPSIS

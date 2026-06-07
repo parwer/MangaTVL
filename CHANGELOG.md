@@ -4,6 +4,25 @@
 
 ---
 
+## [2026-06-07 15:53] แก้ TextRenderer ไม่ให้ข้อความล้นออกนอกเส้น bubble โดยใช้ polygon LIR
+
+**ประเภท:** แก้ bug
+
+**รายละเอียด:**
+- ปัญหาเดิม: renderer ใช้กรอบสี่เหลี่ยม (`combine_bbox` ของ OCR boxes) เป็นพื้นที่ layout แต่ bubble จริงเป็นรูปไข่/อิสระ — มุมและส่วนโค้งของ bubble อยู่ใน bbox แต่ "นอก bubble" → ข้อความที่ผ่านการ fit เข้า bbox + auto-shrink font แล้วยังคงล้นออกนอกเส้น bubble (เห็นชัดในภาพทดสอบล่าสุด)
+- แนวทางแก้: ใช้ `DetectionResult.segmentation` (polygon จาก YOLOv8-seg ที่ pipeline พามาถึง renderer ครบอยู่แล้ว) คำนวณ **Largest Inscribed Rectangle (LIR)** — สี่เหลี่ยม axis-aligned ที่ใหญ่ที่สุดที่ฝังในรูปทรง bubble จริง — แล้วใช้แทนกรอบสี่เหลี่ยมเดิม
+- **(1) Geometry helpers ใน `utils/common.py`:** เพิ่ม `inscribed_rect(polygon, image_shape, padding=0)` ที่ใช้ `cv2.fillPoly` rasterize polygon เป็น binary mask (downsample ถ้า bubble ใหญ่กว่า 200px เพื่อ bound เวลา) → `cv2.erode` ตาม padding เผื่อ stroke/margin → หา LIR ด้วย row-wise largest-rectangle-in-histogram + monotonic stack O(H×W) → scale กลับเป็นพิกัดภาพ; และเพิ่ม `inset_bbox(bbox, pad)` สำหรับ bbox fallback
+- **(2) Render area priority ใน `renderer.py`:** เพิ่ม `_compute_box(det, image_shape, pad)` เลือกตามลำดับ: polygon LIR → `det.bbox` inset → fallback `extract_text_box` เดิม — แก้ปัญหาที่ `det_box` ถูก thread เข้าทุก method แต่ไม่เคยถูกใช้
+- **(3) Stroke ที่ scale ตาม font_size:** เดิม `stroke_width=5` คงที่ — ฟอนต์เล็กกลายเป็นก้อนสีดำและ stroke ดันออกนอก box แม้ glyph จะ fit; เปลี่ยนเป็น `_stroke_for_font(fs) = max(1, fs//12)` และส่ง `stroke_width=stroke` เข้า `multiline_textbbox` ใน `_fits_in_box` เพื่อให้ fit check วัดรวมขอบ stroke (ไม่งั้น glyph fit แต่ stroke ทะลุ)
+- **(4) Fallback ที่ไม่ overflow:** เดิมเมื่อ binary search ไม่เจอ font ที่ fit จะ dump text ทุก 4 token ที่ `min_font_size` → ล้นเสมอ; เปลี่ยนเป็น 2 ชั้น — (ก) shrink font ต่ำกว่า `min_font_size` ลงไปถึง `ABSOLUTE_MIN_FONT_SIZE=10` ก่อน, (ข) ถ้ายังไม่ fit ใช้ `_truncate_to_fit` binary search หาจำนวน token สูงสุดที่ fit แล้วเติม `"…"` — การันตี"ไม่ล้น"ทุกเคส แม้จะเป็น truncated/อ่านไม่ครบ
+- ไม่แตะ `paddleocr_engine.py`, `translator.py`, `schemas/interface.py`, `yolo_detection.py` — polygon ถูกพาผ่านมาอยู่แล้ว ไม่ต้องแก้
+
+**ไฟล์ที่แก้ไข:**
+- `manga_translator/utils/common.py` — เพิ่ม `inscribed_rect` และ `inset_bbox`
+- `manga_translator/rendering/renderer.py` — เพิ่ม `_compute_box` / `_truncate_to_fit` / `_stroke_for_font`; ปรับ `render`, `_render_single`, `wrap_extraction`, `_fits_in_box` ให้ใช้ polygon LIR + stroke scaling + fallback ใหม่
+
+---
+
 ## [2026-06-07 14:54] แก้ PaddleOCR crash (oneDNN/PIR) ด้วย enable_mkldnn=False
 
 **ประเภท:** แก้ bug
