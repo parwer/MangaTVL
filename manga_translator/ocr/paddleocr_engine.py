@@ -24,13 +24,17 @@ class PaddleOCREngine(OCREngine):
 
         result = self.ocr_model.predict(cv_image)
 
-        texts = []
-        boxes = []
+        pairs = []
         for item in result:
-            texts.extend(item["rec_texts"])
-            boxes.extend(item["rec_boxes"])
+            for t, b in zip(item["rec_texts"], item["rec_boxes"]):
+                pairs.append((t, b))
 
-        text = " ".join([i for i in texts])
+        # Reading order: top-to-bottom (y_center), then left-to-right within a line (x_center).
+        pairs.sort(key=lambda tb: ((tb[1][1] + tb[1][3]) / 2, (tb[1][0] + tb[1][2]) / 2))
+
+        texts = [t for t, _ in pairs]
+        boxes = [b for _, b in pairs]
+        text = " ".join(texts)
         return text, boxes
 
     def get_ocr(self, image: Image, detection_results: list[DetectionResult]) -> list[OCRResult]:

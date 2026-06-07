@@ -4,6 +4,23 @@
 
 ---
 
+## [2026-06-07 16:45] แก้ OCR ลำดับสลับ + กำจัด inpaint artifact ด้วย bubble polygon
+
+**ประเภท:** แก้ bug
+
+**รายละเอียด:**
+- แก้ 2 ปัญหาในงานเดียวกัน (จากการวิเคราะห์ผลทดสอบจริงที่เห็นใน `TranslationResult[]` ของ pipeline):
+- **(1) OCR multi-line bubble join ผิดลำดับ** — `PaddleOCREngine.ocr()` ใน [paddleocr_engine.py:22-39](manga_translator/ocr/paddleocr_engine.py#L22-L39) เดิม `" ".join(texts)` ตามลำดับที่ PaddleOCR คืนมา ซึ่งไม่ใช่ reading order → multi-line bubble ได้ string สลับ → translator แปลเพี้ยน semantic เช่นเคสจริง `"PEOPLE?! ARE YOU THE HELL NING! WHO I'M RUN- COURSE OF"` ที่จริงคือ `"OF COURSE I'M RUNNING! WHO THE HELL ARE YOU PEOPLE?!"`; เปลี่ยนเป็น zip `(text, box)` แล้ว sort ด้วย key `(y_center, x_center)` ก่อน join — top-to-bottom เป็นหลัก, left-to-right ในบรรทัดเดียวกัน
+- **(2) Inpaint ลบตัวอักษรเก่าไม่หมด** — `InpainterBase._masking()` ใน [inpainter.py:35-49](manga_translator/inpainting/inpainter.py#L35-L49) เดิมสร้าง mask จาก `item.boxes` (OCR boxes) เท่านั้น → ถ้า OCR fail (โดยเฉพาะ SFX bubble) หรือ box ตึงเกินขอบ glyph → เหลือซากตัวเก่าหลัง inpaint ปนกับ text แปลใหม่; เพิ่ม branch ใช้ `cv2.fillPoly(mask, [polygon], 255)` ของ `item.detection_result.segmentation` เมื่อมี — ลบทั้ง bubble interior สะอาดเอี่ยม **ไม่ขึ้นกับ OCR เห็นตัวอักษรหรือไม่**; ตกกลับใช้ box-based เดิมเมื่อ segmentation = None (free_text / detect-only model)
+- **Translator defensive fix** — `translator.py:23` `concurrent_limit=os.getenv("CONCURRENT_REQUESTS") or 1` กัน `int(None)` crash เมื่อไม่ได้ตั้ง env
+
+**ไฟล์ที่แก้ไข:**
+- `manga_translator/ocr/paddleocr_engine.py` — `ocr()` sort pairs ตาม `(y_center, x_center)` ก่อน join, return signature เดิม
+- `manga_translator/inpainting/inpainter.py` — `_masking()` เพิ่ม polygon branch (cv2.fillPoly) เมื่อมี segmentation; box-based fallback เมื่อไม่มี
+- `manga_translator/translators/translator.py` — fallback `or 1` กัน int(None) crash
+
+---
+
 ## [2026-06-07 15:53] แก้ TextRenderer ไม่ให้ข้อความล้นออกนอกเส้น bubble โดยใช้ polygon LIR
 
 **ประเภท:** แก้ bug

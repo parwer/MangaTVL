@@ -20,7 +20,7 @@ class AsyncTranslatorBase(ABC):
                  timeout: int = 60,
                  user_prompt: str="",
                  guidelines: str="",
-                 concurrent_limit: int=os.getenv("CONCURRENT_REQUESTS"),
+                 concurrent_limit: int=os.getenv("CONCURRENT_REQUESTS") or 1,
                  from_lang: str="English",
                  to_lang: str="Thai",
                  max_retries: int=6

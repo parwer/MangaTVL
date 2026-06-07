@@ -37,11 +37,16 @@ class InpainterBase(ABC):
         mask = np.zeros(image.shape[:2], dtype=np.uint8)
 
         for item in inputs:
-            for box in item.boxes:
-                box = self.expand_box(box, image.shape, expand_margin=expand_margin)
-                x1, y1, x2, y2 = box
-                cv2.rectangle(mask, (x1, y1), (x2, y2), color=255, thickness=-1)
-        
+            poly = getattr(item.detection_result, "segmentation", None)
+            if poly:
+                pts = np.asarray(poly, dtype=np.int32).reshape(-1, 1, 2)
+                cv2.fillPoly(mask, [pts], 255)
+            else:
+                for box in item.boxes:
+                    box = self.expand_box(box, image.shape, expand_margin=expand_margin)
+                    x1, y1, x2, y2 = box
+                    cv2.rectangle(mask, (x1, y1), (x2, y2), color=255, thickness=-1)
+
         return mask
 
     def show_masks(self, image, inputs: list[OCRResult], expand_margin=2, masked_image=None, figsize=(8, 8)):
