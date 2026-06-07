@@ -1,37 +1,25 @@
-import asyncio
-from .translator import AsyncTranslatorBase
+import base64
+
+from google.genai import types
 from google.genai.types import GenerateContentConfig
+
+from .translator import AsyncTranslatorBase
+
 
 class AsyncGeminiTranslator(AsyncTranslatorBase):
     async def _translate(self, inputs: str, image=None):
-        content = [inputs]
-
+        contents = [inputs]
         if image is not None:
-            content.insert(0, image)
+            # Send the image as a real Part, not a data-URI string (which would be
+            # treated as text). `image` is "data:image/jpeg;base64,...." here.
+            raw = base64.b64decode(image.split(",", 1)[1])
+            contents.insert(0, types.Part.from_bytes(data=raw, mime_type="image/jpeg"))
 
-        response = await self._call_api(content)
-        return response
-
-    async def _call_api(self, content):
-        for attempt in range(self.max_retries):
-            if self.RATE_LIMIT_FLAGS.is_set():
-                await self.RATE_LIMIT_FLAGS.wait()
-            try:
-                async with self.semaphore:
-                    response = await self.client.aio.models.generate_content(
-                        model=self.model,
-                        contents=content,
-                        config=GenerateContentConfig(
-                            system_instruction=self.system_prompt
-                        )
-                    )
-                    return response.text
-            except Exception as e:
-                if "429" in str(e):
-                    self.RATE_LIMIT_FLAGS.set()
-                    wait_time = 2 ** attempt
-                    print(f"Rate limit exceeded. Waiting for {wait_time} seconds before retrying...")
-                    await asyncio.sleep(wait_time)
-                    self.RATE_LIMIT_FLAGS.clear()
-                else:
-                    raise e
+        response = await self._call_with_retry(
+            lambda: self.client.aio.models.generate_content(
+                model=self.model,
+                contents=contents,
+                config=GenerateContentConfig(system_instruction=self.system_prompt),
+            )
+        )
+        return response.text if response else None
