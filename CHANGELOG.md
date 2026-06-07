@@ -4,6 +4,83 @@
 
 ---
 
+## [2026-06-07 14:54] แก้ PaddleOCR crash (oneDNN/PIR) ด้วย enable_mkldnn=False
+
+**ประเภท:** แก้ bug
+
+**รายละเอียด:**
+- `PaddleOCR.predict` ระเบิดตอน text detection ด้วย `NotImplementedError: ConvertPirAttribute2RuntimeAttribute not support [pir::ArrayAttribute<pir::DoubleAttribute>] (...onednn_instruction.cc:118)` — error อยู่ลึกใน Paddle inference ไม่เกี่ยวกับโค้ด pipeline (การ crop/clean_poly ทำงานปกติ แล้วค่อยพังตอนเรียก `self.ocr(...)`)
+- สาเหตุ: เวอร์ชันที่ติดตั้งคือ **paddleocr 3.5.0 / paddle 3.3.1** ซึ่ง PIR executor ตัวใหม่ของ Paddle 3.3 แปลง attribute แบบ `Double`-array ผ่าน path ของ oneDNN (MKLDNN) บน CPU ไม่ได้ → detection model พังทันที เป็น bug ฝั่ง backend ของ Paddle ไม่ใช่ของเรา
+- แก้โดยส่ง `enable_mkldnn=False` เข้า constructor ของ `PaddleOCR` (ผ่าน `**kwargs` → PaddleX) ให้ inference วิ่งผ่าน CPU kernel ปกติแทน oneDNN — ทดสอบแล้ว `predict` รันผ่าน คืนผลลัพธ์ได้ ไม่ raise
+- หมายเหตุ: ต้อง restart kernel ของ notebook ก่อน re-run เพราะ object `ocr_engine` เดิมถูกสร้างตอน MKLDNN ยังเปิดอยู่
+- หมายเหตุเพิ่ม: `use_angle_cls=True` เป็นชื่อพารามิเตอร์ของ PaddleOCR 2.x — ใน 3.x เปลี่ยนเป็น `use_textline_orientation` ตอนนี้ค่านี้ถูก `**kwargs` กลืนเฉยๆ ไม่มีผล (ยังไม่แก้ รอยืนยันว่าต้องการ angle classification จริงไหม)
+
+**ไฟล์ที่แก้ไข:**
+- `manga_translator/ocr/paddleocr_engine.py` — เพิ่ม `enable_mkldnn=False` ใน `PaddleOCR(...)` พร้อมคอมเมนต์อธิบายสาเหตุ
+
+---
+
+## [2026-06-07 14:45] implement clean_poly สำหรับลบ pixel นอก segmentation polygon ก่อน OCR
+
+**ประเภท:** เพิ่ม feature
+
+**รายละเอียด:**
+- implement `clean_poly` ใน `OCREngine` (เดิมเป็น `pass` ว่างเปล่า) — ลบ (fill ขาว) ทุก pixel ที่อยู่นอก polygon ของ bubble เพื่อไม่ให้ OCR อ่าน bubble/artwork ข้างเคียงที่ติดมาในกรอบ crop สี่เหลี่ยม ทำให้ผล OCR สะอาดขึ้น
+- ใช้ `cv2.fillPoly` สร้าง mask แล้ว fill นอก polygon; รองรับทั้งภาพ RGB / RGBA / grayscale (pad/trim ค่า fill ตามจำนวน channel)
+- รับพารามิเตอร์ `offset=(x1, y1)` เพราะ `det.segmentation` เก็บพิกัดแบบ full-image แต่ภาพที่ส่งเข้ามาถูก crop ที่ bbox แล้ว — ต้อง shift polygon ให้ตรงกรอบ crop
+- คืนภาพเดิมทันทีเมื่อ `poly` เป็น `None`/ว่าง (รองรับ detect-only model ที่ `segmentation = None`)
+- แก้ลำดับการเรียกใน `PaddleOCREngine.get_ocr` — เดิมเรียก `clean_poly` **หลัง** OCR และทิ้งค่าที่คืนมา ทำให้ OCR ไม่ได้ใช้ภาพที่ clean เลย; เปลี่ยนเป็น clean ก่อนแล้วป้อนผลเข้า `self.ocr(...)` พร้อมส่ง `offset=(x1, y1)`
+
+**ไฟล์ที่แก้ไข:**
+- `manga_translator/ocr/ocr_engine.py` — implement `clean_poly` (เพิ่ม import `cv2`, `numpy`)
+- `manga_translator/ocr/paddleocr_engine.py` — clean ก่อน OCR และส่ง offset เข้า `clean_poly`
+
+---
+
+## [2026-06-07 14:27] เพิ่ม show_image_with_polygons สำหรับ visualize segmentation mask
+
+**ประเภท:** เพิ่ม feature
+
+**รายละเอียด:**
+- เพิ่มฟังก์ชัน `show_image_with_polygons` ใน `manga_translator/utils/common.py` สำหรับวาด polygon outline ลงบนภาพ — ใช้ตรวจดูผลของ `DetectionResult.segmentation` ที่ได้จาก seg model (เช่น YoloDetection ที่โหลด `.pt`/`.onnx` แบบมี seg head) ระหว่างทดสอบใน notebook
+- ตาม pattern เดียวกับ `show_image_with_boxes` ที่มีอยู่ — รับ image (PIL/cv2) + list ของ polygons (แต่ละอันคือ list ของ `[x,y]` points), optional cls_text/color/fig_size; ใช้ `cv2.polylines` วาดเส้นปิด
+- ข้าม polygon ที่เป็น `None` หรือว่างเปล่าโดยอัตโนมัติ — รองรับเคสที่ DetectionResult บางตัวมาจากโมเดล detect-only (`segmentation = None`) ผสมกับโมเดล seg ใน batch เดียวกัน
+
+**ไฟล์ที่แก้ไข:**
+- `manga_translator/utils/common.py` — เพิ่มฟังก์ชัน `show_image_with_polygons`
+
+---
+
+## [2026-06-07 13:05] Implement YoloDetection โดยสืบจาก DetectorBase
+
+**ประเภท:** เพิ่ม feature
+
+**รายละเอียด:**
+- แทนที่ stub เดิมของ `yolo_detection.py` (ที่ instantiate `YOLO()` ระดับ module + เรียก `predict()` ไม่มี args) ด้วยคลาส `YoloDetection(DetectorBase)` ที่ใช้งานได้จริงและเข้ากับ contract เดียวของ `DetectorBase` — pipeline สลับมาใช้ตัวนี้แทน `ONNXDetection` ได้โดยไม่กระทบ calling code
+- ใช้ `ultralytics.YOLO` ซึ่งรองรับทั้งไฟล์ `.pt` และ `.onnx` ในตัวเดียว และทำงานได้ทั้งโมเดล detect และ seg — เก็บ polygon ลง `DetectionResult.segmentation` เมื่อ `result.masks` มีค่า, ถ้าเป็นโมเดล detect ล้วน polygon = None ตามปกติ
+- ส่ง output ของ ultralytics (`result.boxes.xyxy`, `result.boxes.cls`, `result.masks.xy`) เข้า `build_results` ของ base ตรง ๆ ไม่ต้องเขียน loop แปลงเอง
+- Default `model_path` resolve แบบ package-relative ผ่าน `Path(__file__).parent.parent / "assets/models/bast_diplom.onnx"` แทนการใช้ relative path ที่ขึ้นกับ cwd — กันปัญหาเดิมแบบเดียวกับที่เคยเจอใน hardcoded path ของ `ONNXDetection`
+- เปิด `conf` / `iou` / `device` เป็น ctor param ให้ปรับได้ และตั้ง `verbose=False` ตอน inference เพื่อไม่ให้ ultralytics spam log ตอน batch
+
+**ไฟล์ที่แก้ไข:**
+- `manga_translator/detection/yolo_detection.py` — แทนที่ stub ด้วยคลาส `YoloDetection(DetectorBase)` ที่ใช้งานได้จริง
+
+---
+
+## [2026-06-07 12:49] เพิ่ม DetectorBase รวม contract ของ detection backends
+
+**ประเภท:** refactor
+
+**รายละเอียด:**
+- แทนที่ `Detector` placeholder เดิม (inherit ABC ไม่ครบและ logic ไม่สมบูรณ์) ด้วย `DetectorBase` เพื่อกำหนด contract `.detect(image) -> list[DetectionResult]` ที่ทั้ง `ONNXDetection` และ `YoloDetection` (ผ่าน `ultralytics`) จะ subclass ได้ ทำให้ `pipeline.py` สลับ backend ได้โดยไม่ต้องเปลี่ยน calling code
+- เพิ่ม helper `build_result` / `build_results` ที่ออกแบบให้รับ output แบบ ultralytics โดยตรง (xyxy boxes + class ids + polygons จาก `result.masks.xy`) แล้วแปลงเป็น `DetectionResult` ตาม schema รวมฟิลด์ `segmentation` ที่เพิ่งเพิ่มเข้ามา — subclass ของ YOLO จึงเขียนสั้นได้
+- ยังไม่แก้ `onnx_detection.py` ตามที่ผู้ใช้กำกับ จะ retrofit ทีหลังเมื่อพร้อมย้ายมาใช้ `DetectorBase`
+
+**ไฟล์ที่แก้ไข:**
+- `manga_translator/detection/detector.py` — แทนที่ `Detector` placeholder ด้วย `DetectorBase` + helper สำหรับ ultralytics output
+
+---
+
 ## [2026-06-07] เริ่มย้ายไป YOLO (ultralytics) สำหรับ detection พร้อม segmentation และเลิกใช้โมดูลเก่า
 
 **ประเภท:** ปรับโครงสร้าง (refactor) / เตรียม feature
