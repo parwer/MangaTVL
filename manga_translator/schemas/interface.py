@@ -5,6 +5,7 @@ from ..utils.common import refine_unit_value_type
 
 class DetectionResult(BaseModel):
     bbox: list[int]
+    segmentation: list[list[int]] | None = None
     form_type: str # bubble, free_text
 
 class OCRResult(BaseModel):

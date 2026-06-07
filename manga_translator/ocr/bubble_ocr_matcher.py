@@ -2,6 +2,9 @@ import numpy as np
 from typing import List, Tuple, Optional
 from ..schemas.interface import OCRResult, DetectionResult
 
+"""
+No Longer Used - This file is a placeholder for potential future bubble-OCR matching implementation.
+"""
 
 def iou_and_overlap(boxA, boxB):
     # boxes: [xmin,ymin,xmax,ymax]
