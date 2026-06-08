@@ -4,17 +4,32 @@
 
 ---
 
-## [2026-06-07 20:58] เขียน README.md (ภาษาอังกฤษ)
+## [2026-06-08 15:31] เพิ่ม test_pipeline.ipynb สำหรับทดสอบ pipeline แบบ interactive
 
-**ประเภท:** เพิ่ม feature (เอกสาร)
+**ประเภท:** เพิ่ม feature (test)
 
 **รายละเอียด:**
-- เดิม `README.md` ว่างเปล่า (1 บรรทัด) → เขียนใหม่เป็นภาษาอังกฤษตามที่ผู้ใช้ขอ
-- ครอบคลุม: overview + diagram 5 สเตจ (detection/OCR/translation/inpainting/rendering), ตาราง tech stack, requirements (Python 3.12 embedded interpreter, model weights, Thai font, provider key), installation (requirement.txt + deps ที่ขาด), configuration (.env, หมายเหตุ Gemini ใช้ `GOOGLE_API_KEY`), การรัน `uvicorn main:app` + `POST /translate/`, ตัวอย่างใช้ `Pipeline` ตรง (import จาก root `pipeline.py` + `YoloDetection(task="segment")`), project layout, การรัน pytest, notes
-- เขียนให้ตรงสภาพปัจจุบันหลัง refactor ทั้ง session: `pipeline.py` ที่ root, polygon-aware, รูปส่งเป็น multimodal part, fallback ต้นฉบับเมื่อแปล fail
+- สร้าง `test_pipeline.ipynb` ที่ root สำหรับทดสอบ pipeline แบบ interactive ตามที่ผู้ใช้ขอ — ไม่ทับ `notebook.ipynb` เดิมที่ผู้ใช้ใช้เป็น scratch
+- 5 ส่วน: (1) setup imports + `DEVICE`/`IMAGE`; (2) **Detection** — `YoloDetection(task="segment").detect()` + print form_type/bbox/จำนวน polygon points + `show_image_with_polygons`; (3) **OCR** — `EasyOCREngine.get_ocr()` per-bubble + print text; (4) **Full pipeline** — `Pipeline(det_model=YoloDetection(task="segment"), provider="openrouter", model="google/gemini-2.5-flash")` + `await pipe.run(process_image=True)` + `show_images` เทียบ original/translated; (5) **Batch** — `await pipe.run_batch` หลายภาพ
+- ออกแบบให้สเตจ detection/OCR รันได้โดยไม่ต้องมี API key (เทสต์ส่วน CV ได้เลย); สเตจเต็มต้องมี `.env` provider key
+- validate ipynb JSON ผ่าน; ไม่แตะ source code
 
 **ไฟล์ที่แก้ไข:**
-- `README.md` — เขียนเนื้อหาทั้งหมด (เดิมว่าง)
+- `test_pipeline.ipynb` — (ไฟล์ใหม่) notebook ทดสอบ pipeline ทีละสเตจ + รันเต็ม + batch
+
+---
+
+## [2026-06-08 15:23] เพิ่ม resize_max default 256 → 1280 (ภาพ visual context ให้ VLM)
+
+**ประเภท:** แก้ไข
+
+**รายละเอียด:**
+- ภาพที่ส่งให้ translator (VLM) เป็น visual context ตอน `process_image=True` ถูก resize ด้วย `resize_max`; เดิม **256px เล็กเกินไป** ตัวอักษรเล็ก (SFX, ข้อความในกรอบเล็ก) อ่านไม่ครบ
+- เปลี่ยน default เป็น **1024** ตาม sweet spot ที่อ้างอิง (ด้านยาว ~1100-1300px = จุดสมดุลความแม่นยำ vs token, ~1300-1600 tokens/หน้า)
+- ทำได้เพราะหลังแก้บั๊ก base64 [2026-06-07 19:57] รูปถูกส่งเป็น image_url part ที่นับ token แบบ tile-based → เพิ่มเป็น 1024 ยังถูก (~2-3 tiles) ต่างจากเดิมที่ถ้าใหญ่จะระเบิด token
+
+**ไฟล์ที่แก้ไข:**
+- `pipeline.py` — `resize_max` default 256 → 1024
 
 ---
 
@@ -117,6 +132,16 @@
 **รายละเอียด:**
 - เมื่อเปิด `process_image=True` ส่งรูปเป็น visual context ให้ translator → token พุ่งเกือบ 1M/รูป; root cause ไม่ใช่รูปใหญ่ แต่เป็นบั๊ก: รูปถูกส่งเป็น **base64 data-URI string ธรรมดา** ลงใน message `content` → OpenAI-compatible API (OpenRouter) ตีความเป็น **ข้อความ** → tokenize base64 ทั้งก้อนเป็น text token
 - วัดจริงด้วย `tiktoken` (o200k) บน 17.jpg: full-res = **173,960 token**, resize256 = **14,627 token** ต่อ 1 รูป (ไม่ใช่ ~1000 อย่างที่คาด); รูปใหญ่ระดับ 1600px ~388,796 token → รวมหลายรูป/หน้าสูงก็แตะ ~1M ได้
+
+- **อธิบายเพิ่ม — ทำไม token ระเบิด, กลไกทำงานยังไง, ทำไมลดลงได้:**
+  - **โมเดลนับ token ของ "ข้อความ" กับ "รูป" คนละวิธี:**
+    - *ข้อความ* → ผ่าน tokenizer (BPE) ซอย string เป็น sub-word tokens
+    - *รูป* → โมเดล multimodal ไม่ได้นับจากความยาวข้อมูลรูป แต่นับจาก **ขนาด/จำนวน tile** (เช่น Gemini ~258 token ต่อ tile 768px; OpenAI detail:"low" คิดแบบ flat ~85 token) — ไม่เกี่ยวกับว่าไฟล์ใหญ่แค่ไหน
+  - **ทำไมระเบิด:** เดิมเราแปลงรูปเป็น base64 data-URI string (`"data:image/jpeg;base64,/9j/4AAQ..."`) แล้ววางเป็น `content` ที่เป็น **string ธรรมดา** → API ไม่มีทางรู้ว่าเป็นรูป จึงปฏิบัติกับมันเป็น **ข้อความ** → เอา base64 ทั้งก้อนไปเข้า tokenizer
+  - **ทำไมตัวเลขสูงมาก:** base64 เป็นสตริงตัวอักษร/ตัวเลขแบบสุ่ม BPE ยุบเป็น sub-word ที่ใช้ซ้ำไม่ได้ → อัตราส่วนแย่มากที่ ~**0.68 token/char** (1 token ต่อ ~1.46 ตัวอักษร) ดังนั้นยิ่ง base64 ยาว (รูปใหญ่/quality สูง) token ยิ่งพุ่งเชิงเส้น
+  - **ทำไมลดลงได้:** พอย้าย data-URI **ตัวเดิม** ไปไว้ใน image content part `{"type":"image_url",...}` → API decode มันเป็นรูปจริง แล้วคิดเงินแบบ **image token (tile-based)** แทนที่จะ tokenize base64 เป็น text → รูปเดียวกันเป๊ะ แต่จาก ~14k–174k+ เหลือ ~258–1,000 (~50–400x) — **ลดเพราะเปลี่ยน "วิธีแนบรูป" ไม่ใช่เพราะย่อรูป**
+  - **ตัวช่วยเสริม (รอง):** `detail:"low"` cap tile ของฝั่ง OpenAI-style, resize_max=256 ให้รูปเหลือ ~1 tile, JPEG quality=60 ลด payload — ทั้งหมดนี้ลดเพิ่มเล็กน้อย แต่ตัวที่แก้ root cause จริงคือการแนบเป็น image part
+
 - **(1) `openrouter.py`** — เปลี่ยน `_translate` จากใส่ data-URI string ใน `content` ตรงๆ เป็น proper multimodal content part `{"type":"image_url","image_url":{"url": image, "detail":"low"}}` รวมกับ text ใน user message เดียว → API นับเป็น **image token** (gemini-2.5-flash via OpenRouter tile-based ~258-1000 token) ประหยัด ~50-400x; `detail:"low"` เป็น hint ประหยัดเพิ่ม
 - **(2) `common.py`** — `convert_img_to_base64(image, quality=60)` เพิ่ม param quality ส่งเข้า `image.save(format="JPEG", quality=...)` ทั้ง branch pil/cv2 → ลด payload ~58% (q95 40,907 → q60 17,219 chars); ไม่ลด image-token count โดยตรงแต่ payload เล็กลง upload เร็วขึ้น; param มี default ไม่กระทบ caller เดิม (main.py encode ภาพ output)
 - ไม่แตะ `gemini.py`/`groq.py` (ไม่ได้ใช้จริง — main.py ใช้ openrouter), `translator.py` base (data-URI flow เดิมใช้กับ image_url ได้), `pipeline.resize_max=256` (เหมาะกับ "ประหยัดสุด" อยู่แล้ว)

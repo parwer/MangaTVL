@@ -11,8 +11,7 @@ from openai import AsyncOpenAI
 from groq import AsyncGroq
 
 from manga_translator.utils.common import cv2pil, load_image
-from manga_translator.detection.onnx_detection import ONNXDetection
-from manga_translator.ocr.paddleocr_engine import PaddleOCREngine
+from manga_translator.detection.yolo_detection import YoloDetection
 from manga_translator.ocr.easyocr_engine import EasyOCREngine
 from manga_translator.inpainting.opencv_inpainter import OpenCVInpainter
 from manga_translator.rendering.renderer import TextRenderer
@@ -39,11 +38,11 @@ class Pipeline:
         to_lang: str = "thai",
         inpainter=None,
         renderer: Optional[TextRenderer] = None,
-        resize_max: int = 256,
+        resize_max: int = 1024,  # longest side sent to the VLM as visual context (~1300-1600 tokens/page)
         device: str = "cpu",
         font_path: Optional[str] = None,
     ):
-        self.det_model = det_model or ONNXDetection()
+        self.det_model = det_model or YoloDetection(device=device)
         self.ocr_engine = ocr_engine or EasyOCREngine(language="en", device=device)
         self.inpainter = inpainter or OpenCVInpainter(device=device)
         self.renderer = renderer or (TextRenderer(font_path=font_path) if font_path else TextRenderer())

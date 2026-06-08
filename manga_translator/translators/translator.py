@@ -111,7 +111,7 @@ class OpenAICompatibleTranslator(AsyncTranslatorBase):
     async def _translate(self, inputs: str, image=None):
         if image is not None:
             # Image must be a multimodal content part, not a raw data-URI string
-            # in `content` (that gets tokenized as text -> ~14k-390k tokens/image).
+            # in `content` (that gets tokenized as text -> ~2k-4k tokens/image).
             user_content = [
                 {"type": "image_url", "image_url": {"url": image, "detail": "low"}},
                 {"type": "text", "text": inputs},
