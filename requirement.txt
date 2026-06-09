@@ -1,9 +1,41 @@
-opencv-python
-onnxruntime
-torch
-torchvision
-pydantic
-paddleocr
-torch
-torchvision
-easyocr
+# Runtime dependencies for the MangaTVL API (pinned to the working env).
+# Reflects what the code actually imports at startup with the default pipeline
+# (YOLO detection + EasyOCR + OpenCV inpaint + Pillow render + LLM translate).
+
+# --- web service ---
+fastapi==0.136.3
+uvicorn[standard]==0.48.0
+python-dotenv==1.2.2
+beautifulsoup4==4.14.3
+requests==2.34.2
+
+# --- core image / data ---
+pillow==12.2.0
+numpy==2.3.5
+opencv-python==4.13.0.92            # (ultralytics hard-depends on opencv-python; Docker installs its system libs)
+pyyaml==6.0.2
+tqdm==4.67.3
+pydantic==2.13.4
+pythainlp==5.3.4
+
+# --- detection / OCR / inpaint (deep learning) ---
+torch==2.11.0
+torchvision==0.26.0
+ultralytics==8.4.56                 # YoloDetection (default detector)
+easyocr==1.7.2                      # default OCR engine
+manga-ocr==0.1.14                   # OCR for from_lang=japanese (vertical text); model (~400MB) downloads lazily on first Japanese page
+onnxruntime==1.26.0                 # ONNXDetection backend (imported by detection/__init__)
+simple-lama-inpainting==0.1.0       # optional inpaint backend (imported by inpainting/__init__)
+
+# --- LLM translation SDKs ---
+openai==2.38.0                      # OpenRouter (OpenAI-compatible)
+groq==1.2.0
+google-genai==2.6.0
+
+# --- optional: PaddleOCR alternative (not used by the default pipeline) ---
+# pip install paddlepaddle==3.3.1 paddleocr==3.5.0
+
+# --- optional: AI output upscaling (upscaler="realesrgan") ---
+# Not installed by default: basicsr can conflict with newer torchvision. The
+# pipeline lazily imports it and falls back to LANCZOS if it's missing/broken.
+# pip install realesrgan==0.3.0 basicsr==1.4.2

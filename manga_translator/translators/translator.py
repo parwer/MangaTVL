@@ -30,25 +30,41 @@ class AsyncTranslatorBase(ABC):
         self.client = client
         self.model = model
         self.timeout = timeout
-        self.system_prompt = get_sys_prompt(user_prompt=user_prompt,
-                                            guidelines=guidelines,
-                                            from_lang=from_lang,
-                                            to_lang=to_lang)
+        # Prompt components kept as defaults; the system prompt is built per-call
+        # so from_lang/to_lang can be overridden per request.
+        self.user_prompt = user_prompt
+        self.guidelines = guidelines
+        self.from_lang = from_lang
+        self.to_lang = to_lang
+        self._prompt_cache = {}
         self.semaphore = asyncio.Semaphore(int(concurrent_limit))
         self.max_retries = max_retries
         self.max_tokens = max_tokens
         self.RATE_LIMIT_FLAGS = asyncio.Event()
 
-    async def translate(self, ocr_result: list[OCRResult], image=None) -> list[TranslationResult]:
+    def _system_prompt(self, from_lang, to_lang):
+        key = (from_lang, to_lang)
+        if key not in self._prompt_cache:
+            self._prompt_cache[key] = get_sys_prompt(
+                user_prompt=self.user_prompt, guidelines=self.guidelines,
+                from_lang=from_lang, to_lang=to_lang,
+            )
+        return self._prompt_cache[key]
+
+    async def translate(self, ocr_result: list[OCRResult], image=None, *,
+                        model=None, from_lang=None, to_lang=None) -> list[TranslationResult]:
         if not ocr_result:
             return []
 
         if image is not None:
             image = convert_img_to_base64(image)
 
+        model = model or self.model
+        system_prompt = self._system_prompt(from_lang or self.from_lang, to_lang or self.to_lang)
+
         inputs = self._preprocess(ocr_result)
         try:
-            response = await self._translate(inputs, image=image)
+            response = await self._translate(inputs, image=image, model=model, system_prompt=system_prompt)
         except Exception as e:
             print(f"[translate] API call failed: {e}")
             response = None
@@ -100,7 +116,7 @@ class AsyncTranslatorBase(ABC):
         return get_ocr_prompt(user_prompt)
 
     @abstractmethod
-    async def _translate(self, inputs: str, image=None):
+    async def _translate(self, inputs: str, image=None, *, model=None, system_prompt=None):
         raise NotImplementedError
 
 
@@ -108,7 +124,7 @@ class OpenAICompatibleTranslator(AsyncTranslatorBase):
     """Shared implementation for any OpenAI-compatible chat client (OpenRouter,
     Groq, ...) that exposes ``client.chat.completions.create``."""
 
-    async def _translate(self, inputs: str, image=None):
+    async def _translate(self, inputs: str, image=None, *, model=None, system_prompt=None):
         if image is not None:
             # Image must be a multimodal content part, not a raw data-URI string
             # in `content` (that gets tokenized as text -> ~2k-4k tokens/image).
@@ -120,13 +136,13 @@ class OpenAICompatibleTranslator(AsyncTranslatorBase):
             user_content = inputs
 
         messages = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ]
 
         response = await self._call_with_retry(
             lambda: self.client.chat.completions.create(
-                model=self.model,
+                model=model,
                 messages=messages,
                 max_tokens=self.max_tokens,
             )

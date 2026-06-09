@@ -4,7 +4,6 @@ import numpy as np
 from PIL import Image
 import requests
 from io import BytesIO
-import matplotlib.pyplot as plt
 import ast
 
 def xyxy2xywh(box):
@@ -237,10 +236,12 @@ def show_image_with_boxes(image, boxes, cls_text: str=None, fig_size=(10, 10), c
     if cls_text is None:
         cls_text = ["" for _ in range(len(boxes))]
 
+    import matplotlib.pyplot as plt  # debug-only; lazy import keeps it off the runtime path
+
     for i, (box, cls) in enumerate(zip(boxes, cls_text)):
         x1, y1, x2, y2 = box
         color = (255, 0, 0) if color is None else color
-        
+
         cv2.rectangle(cv_image, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
         if cls:
             cv2.putText(cv_image, cls, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
@@ -258,6 +259,8 @@ def show_image_with_polygons(image, polygons, cls_text=None, fig_size=(10, 10), 
         Each polygon is a list of [x, y] points. None / empty polygons are skipped
         (handy when some DetectionResult.segmentation is None from a detect-only model).
     """
+    import matplotlib.pyplot as plt  # debug-only; lazy import keeps it off the runtime path
+
     cv_image = pil2cv(image).copy()
     if cls_text is None:
         cls_text = ["" for _ in range(len(polygons))]
@@ -280,6 +283,8 @@ def show_image_with_polygons(image, polygons, cls_text=None, fig_size=(10, 10), 
 
 
 def show_images(images, titles=None, figsize=(15, 5), vertical=False):
+    import matplotlib.pyplot as plt  # debug-only; lazy import keeps it off the runtime path
+
     n = len(images)
     plt.figure(figsize=figsize)
     for i in range(n):

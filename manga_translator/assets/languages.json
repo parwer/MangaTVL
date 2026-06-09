@@ -1,0 +1,17 @@
+{
+  "_comment": "Map a human language name (matches Pipeline from_lang/to_lang style, lowercase) to OCR engine language codes. EasyOCR and PaddleOCR use different codes, so each language lists both. 'aliases' lets ISO codes / common spellings resolve to the same entry. Optional 'engine' picks a dedicated OCR backend for that source language (default 'easyocr'); 'mangaocr' uses kha-white/manga-ocr, which handles Japanese vertical text far better. Optional 'wrap' tells the renderer how to break lines for that TARGET language: 'pythainlp' (Thai word segmentation), 'char' (per-character, for spaceless CJK), default 'space' (break on spaces, for Latin/Korean/etc).",
+  "english":              { "easyocr": "en",     "paddleocr": "en",          "aliases": ["en", "eng"] },
+  "thai":                 { "easyocr": "th",     "paddleocr": "th",          "aliases": ["th", "tha"], "wrap": "pythainlp" },
+  "japanese":             { "easyocr": "ja",     "paddleocr": "japan",       "aliases": ["ja", "jp", "jpn"], "engine": "mangaocr", "wrap": "char" },
+  "korean":               { "easyocr": "ko",     "paddleocr": "korean",      "aliases": ["ko", "kor"] },
+  "chinese":              { "easyocr": "ch_sim", "paddleocr": "ch",          "aliases": ["zh", "zh-cn", "cn", "chinese_simplified", "simplified chinese", "chi_sim"], "wrap": "char" },
+  "chinese_traditional":  { "easyocr": "ch_tra", "paddleocr": "chinese_cht", "aliases": ["zh-tw", "traditional chinese", "chi_tra"], "wrap": "char" },
+  "vietnamese":           { "easyocr": "vi",     "paddleocr": "vi",          "aliases": ["vi", "vie"] },
+  "french":               { "easyocr": "fr",     "paddleocr": "fr",          "aliases": ["fr", "fra", "fre"] },
+  "german":               { "easyocr": "de",     "paddleocr": "german",      "aliases": ["de", "deu", "ger"] },
+  "spanish":              { "easyocr": "es",     "paddleocr": "es",          "aliases": ["es", "spa"] },
+  "italian":              { "easyocr": "it",     "paddleocr": "it",          "aliases": ["it", "ita"] },
+  "portuguese":           { "easyocr": "pt",     "paddleocr": "pt",          "aliases": ["pt", "por"] },
+  "russian":              { "easyocr": "ru",     "paddleocr": "ru",          "aliases": ["ru", "rus"] },
+  "indonesian":           { "easyocr": "id",     "paddleocr": "id",          "aliases": ["id", "ind"] }
+}

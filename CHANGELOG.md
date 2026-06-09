@@ -4,6 +4,339 @@
 
 ---
 
+## [2026-06-09 19:39] แก้ streaming ใน tempomunkey ไม่ทำงาน (รูปเปลี่ยนตอนจบพร้อมกัน)
+
+**ประเภท:** แก้ bug
+
+**รายละเอียด:**
+- อาการ: ใน demo รูปไม่ทยอยเปลี่ยน รอจน complete ทั้งหมดแล้วค่อย replace พร้อมกัน
+- **พิสูจน์แล้วว่า server stream ถูกต้อง**: รัน `/translate/stream/` จริง (stub yield ทีละ 1 วิ) แล้ว `curl -N` เห็นบรรทัด NDJSON ทยอยมาห่างกัน 1 วิจริง → ปัญหาอยู่ฝั่ง client
+- สาเหตุ: Tampermonkey หลาย build **buffer `onprogress`/`responseText` จนจบ** (โดยเฉพาะ request ข้าม origin https→http localhost) → onload ค่อยยิงทีเดียว = เปลี่ยนรูปพร้อมกัน
+- แก้ฝั่ง client: ใช้ `responseType: "stream"` อ่าน **ReadableStream แบบ incremental** ใน `onloadstart` (วิธี streaming ที่ถูกต้องของ Tampermonkey ≥5) — reader.read() loop → decode → parse NDJSON ทีละบรรทัด → swap รูปทันที; ถ้า build ไม่รองรับ (ไม่มี getReader) **fallback ไป onprogress (delta จาก accumulated text) แล้ว onload** = ไม่ regress; รวม parser เป็น buffer เดียว (`pushText`/`applyLine`) กันบรรทัดถูกตัดข้าม chunk + flush tail ที่ไม่มี \n; กัน double-apply/double-finish ด้วย `usedStream`/`finished`
+- แก้ฝั่ง server เสริม: ใส่ header `X-Accel-Buffering: no` + `Cache-Control: no-cache` ใน StreamingResponse กัน proxy/CDN buffer (เผื่อ deploy หลัง nginx)
+- verify: `node --check` + `py_compile` ผ่าน; server streaming ยืนยันด้วย curl -N (บรรทัดห่าง ~1 วิ)
+
+**ไฟล์ที่แก้ไข:**
+- `tempomunkey.user.js` — streaming ผ่าน responseType:"stream" + fallback onprogress/onload, unified NDJSON buffer
+- `main.py` — header กัน buffering ใน `/translate/stream/`
+
+---
+
+## [2026-06-09 19:16] แก้ Dockerfile.gpu build fail (PEP 668 externally-managed)
+
+**ประเภท:** แก้ bug
+
+**รายละเอียด:**
+- GPU build ล้มที่ `pip install -r requirement.txt` ด้วย error PEP 668 "externally-managed-environment" — base image `pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime` มาร์ก Python เป็น externally managed เลยบล็อก pip ลง system env
+- แก้: ตั้ง `ENV PIP_BREAK_SYSTEM_PACKAGES=1` ใน Dockerfile.gpu (ครอบทั้ง `pip install --upgrade pip` และ `pip install -r requirement.txt`) — เหมาะกับ container เพราะ env เป็นของ image นั้นโดยเฉพาะ
+- CPU `Dockerfile` (`python:3.12-slim`) ไม่กระทบ (ไม่ได้มาร์ก externally-managed) จึงไม่แตะ
+
+**ไฟล์ที่แก้ไข:**
+- `Dockerfile.gpu` — เพิ่ม `PIP_BREAK_SYSTEM_PACKAGES=1` ใน ENV
+
+---
+
+## [2026-06-09 19:08] เพิ่ม upscale ภาพตอน return (LANCZOS + Real-ESRGAN, เลือกต่อ request)
+
+**ประเภท:** เพิ่ม feature
+
+**รายละเอียด:**
+- ปัญหา: ต้นฉบับ low-res/เบลอ ถึงเพิ่ม font ก็ยังอ่านยาก → เพิ่มขั้น upscale ภาพ final ตอน return
+- ไฟล์ใหม่ `rendering/upscale.py` — `upscale_image(image, factor, method, device)`:
+  - `lanczos` (default): PIL resize คุณภาพสูง เร็ว ไม่ลง dep — ภาพ (และข้อความที่เราเรนเดอร์) ใหญ่ขึ้น แต่อาร์ตเวิร์กไม่ deblur
+  - `realesrgan`: AI super-resolution (โมเดล anime 6B, x4) deblur อาร์ตเวิร์กจริง — **lazy import** realesrgan/basicsr + โมเดลโหลดครั้งแรก, ใช้ tiling กัน OOM, รันบน device เดียวกับ pipeline; ถ้า import/รันไม่ได้ (basicsr ชนกับ torchvision ใหม่) **fallback เป็น LANCZOS อัตโนมัติ** + log
+  - factor <=1 = no-op, clamp ที่ 4.0, factor มั่ว = คืนภาพเดิม
+- upscale ที่ขั้น final (หลังเรนเดอร์) → ใช้เหมือนกันทั้ง 2 method ไม่ต้องแก้พิกัด detection; ข้อความเราที่ supersample มาแล้วยังคมตอนขยาย
+- ปรับ **ต่อ request**: `_run_on_image` รับ `upscale`/`upscaler` → ไหลผ่าน run/run_batch/stream → `main.py` field `upscale`(float)/`upscaler`(str) ใน TranslateRequest (ทั้งสอง endpoint) → `tempomunkey` ช่อง "upscale image" (1-4) + dropdown fast(lanczos)/AI(realesrgan), ส่งเฉพาะเมื่อ >1
+- `realesrgan`/`basicsr` ไม่อยู่ใน requirement.txt หลัก (basicsr พังกับ torchvision ใหม่) — ใส่เป็น optional comment; default lanczos ทำงานชัวร์
+- verify: `py_compile` + `node --check` + `pytest` 74 passed (เพิ่ม `tests/test_upscale.py` 6 เคส รวม fallback) + import main ไม่ดึง realesrgan ตอน start (lazy ผ่าน) + lanczos 2x ขยายถูก + realesrgan fallback→lanczos จริง
+
+**ไฟล์ที่แก้ไข:**
+- `manga_translator/rendering/upscale.py` (ไฟล์ใหม่) — upscale_image (lanczos + realesrgan lazy/fallback)
+- `pipeline.py` — เรียก upscale_image ตอน return + thread `upscale`/`upscaler`
+- `main.py` — field `upscale`/`upscaler` (ทั้งสอง endpoint)
+- `tempomunkey.user.js` — ช่อง upscale factor + method picker
+- `requirement.txt` — comment optional realesrgan/basicsr
+- `tests/test_upscale.py` (ไฟล์ใหม่) — 6 เคส
+- `README.md` — doc upscale/upscaler + userscript
+
+---
+
+## [2026-06-09 18:58] ทำให้ข้อความที่แปลใหญ่ขึ้น + คมขึ้น (text_scale + supersample)
+
+**ประเภท:** เพิ่ม feature / แก้ไข
+
+**รายละเอียด:**
+- ปัญหา: renderer auto-fit ฟอนต์ลง LIR (สี่เหลี่ยมในเส้น polygon) ของบับเบิล ซึ่งอนุรักษ์มาก (บับเบิลทรงรี LIR เล็กกว่ากรอบเยอะ) → ไทยที่ข้อความยาวถูกบีบเล็ก อ่านยาก
+- **ใหญ่ขึ้น (text_scale):** เพิ่ม `_inflate_box` ขยายพื้นที่ฟิตจาก LIR ออกไปหา bbox ตามสัดส่วน `text_scale` (รอบจุดกึ่งกลาง, cap ที่ det.bbox inset + ขอบภาพ → ไม่ล้นเกินกรอบบับเบิล/ภาพ) แล้ว binary-search หาขนาดฟอนต์ในกล่องที่ใหญ่ขึ้น = ตัวใหญ่ขึ้นโดยยังไม่ overflow; default `1.2`, clamp `[0.5, 2.0]`
+- **คมขึ้น (supersample):** วาดข้อความบน overlay RGBA ที่ scale `supersample`× (default 2) แล้ว downscale LANCZOS composite ทับ → ขอบ glyph คมขึ้นที่ขนาดเดิม โดย**ไม่แตะอาร์ตเวิร์ก** (fit search ยังวัดใน original space, วาดจริง ×ss); เพิ่ม `_load_font` lru cache อยู่แล้วช่วยลดต้นทุน
+- ปรับได้ **ต่อ request**: `render(..., text_scale=None)` → ไหลผ่าน pipeline (run/run_batch/stream/_run_on_image) → `main.py` field `text_scale` ใน TranslateRequest (ทั้ง `/translate/` + `/translate/stream/`) → `tempomunkey` ช่อง "text size" (number 0.5-2.0) persist `mtvl_text_scale` ส่งเป็น float
+- backward-compat: ไม่ส่ง text_scale ใช้ default ของ renderer (1.2); supersample เป็น config ตอนสร้าง renderer (ไม่ใช่ per-request)
+- verify: `py_compile` + `node --check` + `pytest` 68 passed + **render smoke test**: บับเบิลทรงรี ไทย text_scale 1.0/1.2/1.6 → ink เพิ่ม 4473/5603/8035 px (ใหญ่ขึ้นจริง), output size คงเดิม (supersample composite กลับถูกต้อง)
+
+**ไฟล์ที่แก้ไข:**
+- `manga_translator/rendering/renderer.py` — `text_scale`/`supersample` params, `_inflate_box`, overlay supersample, `_clamp_text_scale`, `_render_single` วาด ×ss
+- `pipeline.py` — thread `text_scale`
+- `main.py` — field `text_scale` (ทั้งสอง endpoint)
+- `tempomunkey.user.js` — ช่อง text size + persist + ส่ง float
+- `README.md` — doc text_scale + supersample + userscript text size
+
+---
+
+## [2026-06-09 18:46] เพิ่มฟอนต์มังงะ/คอมิกหลายแบบ + เลือกฟอนต์ได้ต่อ request (และใน tempomunkey)
+
+**ประเภท:** เพิ่ม feature
+
+**รายละเอียด:**
+- โหลดฟอนต์สไตล์มังงะ/คอมิก 11 แบบ (OFL/Apache จาก Google Fonts) ลง `assets/fonts/` ครอบ 4 สคริปต์ — ตรวจ glyph coverage จริงด้วย fontTools cmap:
+  - ไทย+Latin: Itim, Mali, Sriracha, Charm (+ THSarabunNew เดิม)
+  - Latin คอมิก: Bangers, Comic Neue, Permanent Marker, Patrick Hand
+  - ญี่ปุ่น: Yusei Magic / จีน: Zhi Mang Xing / เกาหลี: Nanum Pen
+- ทำ registry `assets/fonts.json` (key/file/label/scripts + `defaults` ต่อภาษา) — เพิ่มฟอนต์ใหม่แค่วาง .ttf + เพิ่ม entry
+- ไฟล์ใหม่ `rendering/fonts.py`: `list_fonts()` (catalogue ให้ API/client) + `font_path(name, lang, fallback)` resolve ตามลำดับ key→default ของภาษา→latin default→fallback (key มั่วไม่ crash, fallback อัตโนมัติ)
+- `utils/lang.py`: เพิ่ม `canonical_name()` (alias→ชื่อภาษา canonical) ใช้ map ภาษา→ฟอนต์ default
+- `renderer.py`: `render(..., font=None)` resolve font path ครั้งเดียวต่อ call แล้ว thread เข้า `_render_single/wrap_extraction/_fits_in_box/_truncate_to_fit` (เลิกใช้ `self.font_path` ตรงๆ); เพิ่ม `_load_font` cached (lru) ลดการอ่านไฟล์ซ้ำตอน binary search ขนาดฟอนต์ — ถ้า `font` ไม่ระบุใช้ default ตาม to_lang → CJK/เกาหลีได้ฟอนต์ที่มี glyph ไม่เป็นกล่อง tofu
+- `pipeline.py`: thread `font` ผ่าน run/run_batch/run_batch_stream/_run_on_image → render
+- `main.py`: เพิ่ม field `font` ใน TranslateRequest (ส่งเข้าทั้ง `/translate/` และ `/translate/stream/`) + endpoint ใหม่ `GET /fonts/` คืน catalogue
+- `tempomunkey.user.js`: เพิ่ม dropdown ฟอนต์ใน Settings, fetch `GET /fonts/` ตอนโหลดมา populate (sync กับ fonts.json อัตโนมัติ), persist `mtvl_font`, ส่ง `font` ใน body เมื่อเลือก
+- verify: `py_compile` + `node --check` + import main (routes มี `/fonts/`, 12 ฟอนต์) + `pytest` 68 passed (เพิ่ม `tests/test_fonts.py` 7 เคส) + **render smoke test จริง**: ไทย(THSarabun)/อังกฤษ(Bangers)/ญี่ปุ่น(YuseiMagic auto) วาด glyph ออกครบทุกภาษา
+
+**ไฟล์ที่แก้ไข:**
+- `manga_translator/assets/fonts/*.ttf` (11 ไฟล์ใหม่) — ฟอนต์มังงะ/คอมิก
+- `manga_translator/assets/fonts.json` (ไฟล์ใหม่) — registry + defaults ต่อภาษา
+- `manga_translator/rendering/fonts.py` (ไฟล์ใหม่) — list_fonts / font_path resolver
+- `manga_translator/rendering/renderer.py` — `font` param + thread font_path + `_load_font` cache
+- `manga_translator/utils/lang.py` — เพิ่ม `canonical_name()`
+- `pipeline.py` — thread `font`
+- `main.py` — field `font` + `GET /fonts/`
+- `tempomunkey.user.js` — font picker + fetch /fonts/
+- `tests/test_fonts.py` (ไฟล์ใหม่) — 7 เคส
+- `README.md` — ตารางฟอนต์ + `/fonts/` + field font + userscript
+
+---
+
+## [2026-06-09 18:29] ขยาย tokenization ของ renderer ให้รองรับหลายภาษา (ตัดบรรทัดตาม to_lang)
+
+**ประเภท:** เพิ่ม feature
+
+**รายละเอียด:**
+- เดิม renderer ตัดคำด้วย pythainlp (`engine="newmm"`) ตายตัว + ใช้ trick แทนช่องว่างด้วย "-" → ใช้ได้เฉพาะไทย ภาษาอื่น (จีน/ญี่ปุ่นไม่มีช่องว่าง, อังกฤษ/เกาหลีมีช่องว่าง) ตัดบรรทัดเพี้ยน
+- ทำ tokenization แบบ **ขับด้วยข้อมูลจาก languages.json** (field `wrap` ใหม่) เลือก 3 โหมดตาม target language:
+  - `pythainlp` (ไทย) — ตัดคำ ไม่ตัดกลางคำ
+  - `char` (ญี่ปุ่น/จีน) — ตัดได้ทุกตัวอักษร (CJK ขึ้นบรรทัดแบบนี้อยู่แล้ว ไม่ต้องลง morphological analyzer หนัก)
+  - `space` (อังกฤษ/เกาหลี/อื่นๆ default) — ตัดที่ช่องว่าง คำอยู่ครบ
+- ไฟล์ใหม่ `rendering/tokenize.py`: `tokenize(text, lang)` + `is_space_delimited(lang)` (import pythainlp แบบ lazy เฉพาะตอนแปลเป็นไทย)
+- `utils/lang.py`: เพิ่ม `wrap_mode(name, default="space")` อ่าน field `wrap` (รองรับ alias/case-insensitive ผ่าน `_lookup` เดิม)
+- `renderer.py`: เลิก import pythainlp ตรงๆ; `tokenizer` param เป็น optional override `(text, lang)->list` (default None = ใช้ default ตามภาษา); เพิ่ม `lang` default + `render(image, inputs, lang=None)`; แทน trick ช่องว่าง/ขีด ด้วย `_prepare_text`/`_finalize_text` (no-space lang ป้องกันช่องว่างเดิมด้วย sentinel U+F8FF แล้วคืนภายหลัง, space lang คงช่องว่างเป็น word separator)
+- `pipeline.py`: ส่ง `lang=to_lang or self.to_lang` เข้า `renderer.render` (ตัดบรรทัดตามภาษาปลายทางต่อ request)
+- verify: `py_compile` + `pytest` 61 passed (เพิ่ม `tests/test_tokenize.py` 5 เคส) + ทดสอบ `_prepare_text`/`_finalize_text` round-trip อังกฤษ/ไทย/ญี่ปุ่น/จีน ครบ (คืนช่องว่างเดิมถูกต้องทุกภาษา)
+
+**ไฟล์ที่แก้ไข:**
+- `manga_translator/rendering/tokenize.py` (ไฟล์ใหม่) — tokenize/is_space_delimited ตาม wrap mode
+- `manga_translator/rendering/renderer.py` — language-aware prepare/finalize + lang param
+- `manga_translator/utils/lang.py` — เพิ่ม `wrap_mode()`
+- `manga_translator/assets/languages.json` — เพิ่ม field `wrap` (thai/japanese/chinese/chinese_traditional) + อัปเดต `_comment`
+- `pipeline.py` — ส่ง to_lang เข้า render
+- `tests/test_tokenize.py` (ไฟล์ใหม่) — 5 เคส
+- `README.md` — doc รendering line-breaking ตามภาษา
+
+---
+
+## [2026-06-09 18:19] เพิ่ม manga-ocr engine สำหรับภาษาญี่ปุ่น (เลือก OCR engine ต่อภาษา)
+
+**ประเภท:** เพิ่ม feature
+
+**รายละเอียด:**
+- EasyOCR (default) ออกแบบมาสำหรับข้อความแนวนอน แต่มังงะญี่ปุ่นเขียนแนวตั้ง (tategaki) → อ่านเพี้ยน/ลำดับผิด ใช้แปลจริงไม่ได้
+- เพิ่ม `MangaOCREngine` (kha-white/manga-ocr) ที่ train เฉพาะญี่ปุ่นในมังงะรวมแนวตั้ง — รับ crop ของบับเบิลเดียวคืน string ตรงๆ เข้า pattern `get_ocr` (crop bbox → `clean_poly` → OCR) เหมือน engine อื่น; ไม่มี box ต่อบรรทัด → ใช้ bubble bbox เป็น box เดียว
+- เลือก engine ต่อภาษาจาก field `engine` ใน `languages.json` (japanese → `mangaocr`, อื่นๆ default → `easyocr`); เกาหลี/จีนเป็นแนวนอน EasyOCR พอ
+- `pipeline._get_ocr` เลือก class ตาม `ocr_engine_name(lang)` + เปลี่ยน cache key เป็น `(engine, code)` กัน collision; cache engine ต่อภาษาเหมือนเดิม
+- **lazy/optional**: `import manga_ocr` อยู่ใน `__init__` ของ engine → โหลดโมเดล (~400MB) เฉพาะตอนมี request ญี่ปุ่นครั้งแรกเท่านั้น (import main ตอน start ไม่ดึง manga_ocr — verify แล้ว)
+- `tempomunkey.user.js` เพิ่ม field source language ใน Settings (persist `mtvl_from_lang`, ส่ง `from_lang` ใน body เมื่อกรอก) — จำเป็นเพื่อ trigger ญี่ปุ่น (เดิมส่งแค่ to_lang → server default english)
+- verify: `py_compile` + `node --check` + import main (lazy ผ่าน, en→EasyOCREngine) + `pytest` 56 passed (เพิ่ม 3 เคส `ocr_engine_name`) + ยืนยัน `manga-ocr==0.1.14` เป็นเวอร์ชันล่าสุด
+
+**ไฟล์ที่แก้ไข:**
+- `manga_translator/ocr/mangaocr_engine.py` (ไฟล์ใหม่) — `MangaOCREngine` lazy import manga_ocr
+- `manga_translator/assets/languages.json` — เพิ่ม `engine: "mangaocr"` ให้ japanese + อัปเดต `_comment`
+- `manga_translator/utils/lang.py` — refactor `_lookup` + เพิ่ม `ocr_engine_name()`
+- `pipeline.py` — `_get_ocr` เลือก engine ตามภาษา, cache key `(engine, code)`
+- `tempomunkey.user.js` — Settings เพิ่ม source language + ส่ง from_lang
+- `requirement.txt` — เพิ่ม `manga-ocr==0.1.14` (โมเดลโหลด lazy)
+- `tests/test_lang.py` — 3 เคส `ocr_engine_name`
+- `README.md` — doc OCR engine ต่อภาษา + userscript source language
+
+---
+
+## [2026-06-09 17:58] เพิ่ม streaming response — ทยอยส่งผลลัพธ์ทีละรูป
+
+**ประเภท:** เพิ่ม feature
+
+**รายละเอียด:**
+- เดิม `/translate/` ใช้ `asyncio.gather` รอทั้ง batch เสร็จก่อนแล้วค่อย return ทีเดียว → รูปที่เสร็จก่อนถูกกักรอจนรูปสุดท้ายเสร็จ
+- เพิ่ม `Pipeline.run_batch_stream()` — async generator ใช้ `asyncio.as_completed` yield `(index, image)` **ตามลำดับที่เสร็จ** (ไม่ใช่ลำดับ request); รูปที่ fail yield `(index, None)`; ห่อ `try/except` ต่อรูปกัน 1 รูปพังแล้วล้ม stream ทั้งก้อน
+- เพิ่ม endpoint `POST /translate/stream/` (body เดิม) ตอบเป็น **NDJSON** (`application/x-ndjson`) ผ่าน `StreamingResponse` — 1 บรรทัด/รูป `{"index", "image": base64|null}` ส่งทันทีที่รูปนั้นเสร็จ; คง `/translate/` เดิมไว้สำหรับ caller แบบ one-shot
+- `tempomunkey.user.js` เปลี่ยนไปเรียก `/translate/stream/` แล้วอ่าน NDJSON ใน `onprogress` (parse เฉพาะบรรทัดที่ครบ `\n`, จำ `consumed` offset) → swap รูปในหน้าทันทีทีละรูป + อัปเดต status `done/fail` แบบ progressive; ตอน Interrupt เคลียร์เฉพาะ badge ที่ยัง pending (`…`) คงรูปที่แปลเสร็จแล้วไว้
+- verify: `py_compile` pipeline.py+main.py + `node --check` userscript + import main (routes มี `/translate/stream/`, `run_batch_stream` เป็น async-gen) + `pytest` 53 passed
+
+**ไฟล์ที่แก้ไข:**
+- `pipeline.py` — เพิ่ม `run_batch_stream()` (as_completed + index + per-image try/except)
+- `main.py` — endpoint `/translate/stream/` (StreamingResponse + NDJSON); import StreamingResponse, json
+- `tempomunkey.user.js` — consume NDJSON stream ใน onprogress, swap ทีละรูป, abort คงรูปที่เสร็จแล้ว
+- `README.md` — เอกสาร endpoint streaming + อัปเดตตาราง userscript
+
+---
+
+## [2026-06-09 17:52] Wire per-language OCR cache เข้า pipeline (OCR ตาม from_lang)
+
+**ประเภท:** เพิ่ม feature
+
+**รายละเอียด:**
+- ต่อยอด language mapping [17:43] — ให้ OCR เลือกภาษาตาม `from_lang` ต่อ request **โดยไม่โหลด EasyOCR ใหม่ทุกครั้ง** (ตอบคำถามผู้ใช้เรื่องโหลดซ้ำ)
+- เดิม `pipeline.py` สร้าง `EasyOCREngine(language="en")` ตัวเดียวตอน init → เปลี่ยนภาษา OCR ต่อ request ไม่ได้
+- แก้: เปลี่ยนเป็น **registry ต่อภาษา (lazy + cache)** — `_get_ocr(from_lang)`: ถ้า caller ส่ง `ocr_engine` มา ใช้ตัวนั้นเสมอ (`_ocr_override`); ไม่งั้น `code = ocr_lang_code(from_lang, "easyocr")` แล้ว build `EasyOCREngine(language=code)` cache ใน `self._ocr_engines` → **ภาษาเดิม reuse engine เดิม โหลด model แค่ครั้งแรกต่อภาษา**
+- prebuild OCR ของ default `from_lang` ตอน init + คง `self.ocr_engine` (backward-compat); `_run_on_image` ใช้ `self._get_ocr(from_lang).get_ocr(...)`
+- ครบ loop: client ส่ง `from_lang` → OCR อ่านภาษานั้น → translate ภาษานั้น
+- verify: `py_compile` + import main (prebuild `en`, reuse engine เดิมเมื่อภาษาเดิม=True) + `pytest` 53 passed
+
+**ไฟล์ที่แก้ไข:**
+- `pipeline.py` — OCR registry ต่อภาษา (`_ocr_override`/`_ocr_engines`/`_get_ocr`) + ใช้ใน `_run_on_image`; import `ocr_lang_code`
+
+---
+
+## [2026-06-09 17:43] เพิ่ม language mapping (assets) สำหรับ map ภาษา → OCR code
+
+**ประเภท:** เพิ่ม feature
+
+**รายละเอียด:**
+- เพิ่ม `manga_translator/assets/languages.json` — map ชื่อภาษา (lowercase แบบเดียวกับ `from_lang`/`to_lang`) → OCR language code โดยมีทั้ง **easyocr และ paddleocr** (โค้ดต่างกัน เช่น japanese → easyocr `ja` / paddleocr `japan`, korean → `ko`/`korean`, chinese → `ch_sim`/`ch`) + field `aliases` ให้ ISO code/สะกดอื่น (`jp`, `zh-cn`, `eng`, …) resolve เข้า entry เดียวกัน
+- ครอบคลุม english/thai/japanese/korean/chinese/chinese_traditional/vietnamese/french/german/spanish/italian/portuguese/russian/indonesian
+- เพิ่ม helper `manga_translator/utils/lang.py`: `load_language_map()` (lru_cache, กรอง key `_comment`) + `ocr_lang_code(name, engine="easyocr", default="en")` — resolve canonical/alias แบบ case-insensitive + trim, fallback default เมื่อไม่รู้จัก
+- จุดประสงค์: แปลง `from_lang` ต่อ request → OCR code (เตรียม wire เข้า `EasyOCREngine`/`PaddleOCREngine` ที่ตอนนี้ hardcode `language="en"`) — **ยังไม่ wire** asset+loader พร้อมใช้
+- เพิ่ม `tests/test_lang.py` 6 เทสต์ (canonical, paddle codes ต่าง, alias, case-insensitive, unknown→default/None, ไม่มี `_comment`); verify JSON valid + py_compile + pytest 6 passed
+
+**ไฟล์ที่แก้ไข:**
+- `manga_translator/assets/languages.json` — (ไฟล์ใหม่) language → OCR code map
+- `manga_translator/utils/lang.py` — (ไฟล์ใหม่) loader + `ocr_lang_code`
+- `tests/test_lang.py` — (ไฟล์ใหม่) เทสต์ helper
+
+---
+
+## [2026-06-09 17:38] ย้าย model/ภาษา/provider/api_key เป็น per-request
+
+**ประเภท:** refactor / เพิ่ม feature
+
+**รายละเอียด:**
+- เดิม translator ผูก model/ภาษา/provider+key ที่ `__init__` (สร้าง `system_prompt` ครั้งเดียว) + Pipeline มี translator ตัวเดียว → เปลี่ยนต่อ request ไม่ได้; ปรับให้ client (API) เลือก provider/key/model/ภาษา ต่อ request ได้
+- **`translator.py`:** เลิก build `self.system_prompt` ตายตัว → เก็บ `user_prompt/guidelines/from_lang/to_lang/model` เป็น default + `_system_prompt(from_lang,to_lang)` ที่ cache; `translate()` รับ keyword `model/from_lang/to_lang` ต่อ call (override) แล้วส่ง `model`+`system_prompt` เข้า `_translate`; abstract signature → `_translate(inputs, image=None, *, model=None, system_prompt=None)`
+- **`gemini.py` + `OpenAICompatibleTranslator`:** `_translate` ใช้ model/system_prompt จาก args (openrouter/groq subclass pass ไม่ต้องแก้)
+- **`pipeline.py`:** registry `_translators` cache key `(provider, api_key)` + `_resolve_key` (fallback env `OPENROUTER_API_KEY`/`GOOGLE_API_KEY`/`GROQ_API_KEY`) + `_get_translator` (lazy build client จาก key ที่ส่งมา); `run`/`run_batch`/`_run_on_image` รับ `provider/api_key/model/from_lang/to_lang` ส่งต่อถึง translate; ยังสร้าง default translator ตอน init ไว้ validate
+- **`main.py`:** `TranslateRequest` เพิ่ม optional `provider/api_key/model/from_lang/to_lang` → ส่งเข้า run_batch (env เป็น fallback)
+- **`tempomunkey.user.js`:** เพิ่ม `@grant GM_setValue/GM_getValue` + Settings panel (provider/model/target language/api_key password) persist ผ่าน GM storage + ใส่ลง POST body เฉพาะ field ที่กรอก
+- **tests:** อัปเดต FakeTranslator (default attrs + `_translate` รับ kwargs, เก็บ last_kwargs) + 2 เทสต์ใหม่ (model override ถูกส่ง, to_lang override สร้าง system_prompt ต่างกัน + cache 2 keys)
+- **README:** fields ใหม่ในตัวอย่าง `/translate/` + security note (api_key ใน body → ใช้ HTTPS production) + Settings row ในตาราง userscript
+- verify: `py_compile` + `node --check` + `pytest` 47 passed (45+2) + `import main` สร้าง registry ได้
+
+**ไฟล์ที่แก้ไข:**
+- `manga_translator/translators/translator.py` — per-call model/ภาษา + `_system_prompt` cache + `_translate` signature
+- `manga_translator/translators/gemini.py` — `_translate` ใช้ model/system_prompt args
+- `pipeline.py` — `(provider,key)` registry + `_resolve_key` + per-call params
+- `main.py` — TranslateRequest + ส่ง params เข้า run_batch
+- `tempomunkey.user.js` — Settings panel + ส่งใน body
+- `tests/test_translator_mapping.py` — FakeTranslator + 2 เทสต์ใหม่
+- `README.md` — fields + security note
+
+---
+
+## [2026-06-09 17:02] เพิ่มปุ่ม Interrupt ใน tempomunkey.user.js
+
+**ประเภท:** เพิ่ม feature
+
+**รายละเอียด:**
+- เพิ่มปุ่ม **Interrupt** ใน floating bar ของ userscript เพื่อยกเลิกคำขอแปลที่กำลังทำอยู่ (เช่น เลือกผิด หรือรอนานเกิน)
+- เก็บ handle ของ `GM_xmlhttpRequest` ที่กำลังทำงาน (`activeReq`) + รายการรูปที่กำลังแปล (`activeImgs`); ปุ่ม Interrupt เรียก `activeReq.abort()`
+- เพิ่ม `setBusy(busy)` สลับ enable/disable ระหว่างปุ่ม Translate ↔ Interrupt (Interrupt disabled ตอน idle)
+- เพิ่ม `onabort` callback: เคลียร์ badge "…" ของรูปที่ค้าง + status "interrupted"; ทุก path (onload/onerror/ontimeout/onabort) reset `setBusy(false)` + `activeReq=null` ครบ
+- verify: `node --check` ผ่าน
+
+**ไฟล์ที่แก้ไข:**
+- `tempomunkey.user.js` — เพิ่มปุ่ม Interrupt + abort logic + busy-state toggle
+
+---
+
+## [2026-06-09 16:58] เพิ่ม tempomunkey.user.js — userscript เลือกแปลรูป + process_image
+
+**ประเภท:** เพิ่ม feature
+
+**รายละเอียด:**
+- สร้าง Tampermonkey userscript ฝั่ง client ให้ผู้ใช้เลือกแปลรูปมังงะบนหน้า reader (ทีละรูป / ทั้งหมด) + toggle process_image (visual context) ตามที่ออกแบบ — คู่กับ `POST /translate/` (รับ `images` list + `process_image`, คืน base64 เรียง index)
+- ฟีเจอร์: (1) `scanImages` หา candidate รูป (`naturalWidth >= 400` ตัด icon/banner) วาง **checkbox overlay** มุมรูป + เก็บ original src ไว้ revert; (2) **floating bar** — Select all/Clear, checkbox Visual context, Translate selected, Revert all, Rescan (lazy-load), status; (3) ส่งผ่าน **`GM_xmlhttpRequest`** (ข้าม CORS/mixed-content https→http localhost); (4) swap `img.src` เป็น base64 in-place + badge ✓/✕ ต่อรูป (null = คงรูปเดิม); (5) Revert all คืน src เดิม; reposition overlay ตอน scroll/resize + periodic rescan
+- config ด้านบนไฟล์: `API_BASE` (default localhost:8000), `MIN_WIDTH`, `REQUEST_TIMEOUT`; ผู้ใช้ต้องแก้ `@match` เป็นโดเมน tempomunkey + รัน server + ตั้ง provider key
+- หมายเหตุ hotlink: ถ้า CDN กัน server fetch → รูปนั้นได้ null (อนาคต: userscript upload bytes แทน URL)
+- verify: `node --check` syntax ผ่าน; ไม่แตะ server code (endpoint พร้อมแล้ว)
+
+**ไฟล์ที่แก้ไข:**
+- `tempomunkey.user.js` — (ไฟล์ใหม่) Tampermonkey userscript
+- `README.md` — เพิ่มหัวข้อ Browser userscript (tempomunkey)
+
+---
+
+## [2026-06-09 15:41] แก้ Docker build fail — opencv libxcb.so.1 (system libs)
+
+**ประเภท:** แก้ bug
+
+**รายละเอียด:**
+- `docker compose up --build` พังที่ขั้น pre-download EasyOCR: `ImportError: libxcb.so.1: cannot open shared object file` ตอน `import cv2`
+- สาเหตุ: **ultralytics hard-depend `opencv-python` (non-headless) เสมอ** → ต่อให้ pin `opencv-python-headless` pip ก็ลง `opencv-python` ตามมาด้วย และ cv2 ที่โหลดเป็น non-headless ต้องการ X/GL system libs ที่ `python:3.12-slim` ไม่มี
+- แก้: (1) `requirement.txt` เปลี่ยน `opencv-python-headless` → `opencv-python==4.13.0.92` ให้ตรงกับ ultralytics (เลี่ยงติดตั้ง opencv 2 ตัวซ้อน); (2) `Dockerfile` + `Dockerfile.gpu` เพิ่ม apt system libs ที่ opencv ต้องการ: `libglib2.0-0 libgl1 libxcb1 libsm6 libxext6 libxrender1` (เดิมมีแค่ libglib2.0-0)
+- หมายเหตุ: requirement.txt เปลี่ยน → docker rebuild จะ reinstall pip deps (torch ~540s) อีกรอบ; verify จริงต้องรัน `docker compose up --build` ใหม่ (Docker daemon ไม่ได้รันใน dev นี้)
+
+**ไฟล์ที่แก้ไข:**
+- `requirement.txt` — opencv-python-headless → opencv-python
+- `Dockerfile`, `Dockerfile.gpu` — เพิ่ม opencv system libs (libgl1/libxcb1/libsm6/libxext6/libxrender1)
+
+---
+
+## [2026-06-09 14:52] /translate/ รับ list รูปจาก client (ใช้กับ tempomunkey)
+
+**ประเภท:** refactor / เพิ่ม feature
+
+**รายละเอียด:**
+- เดิม `POST /translate/` รับ `url` หน้าเว็บเดียวแล้ว server scrape `<img>` ทั้งหมด (requests+BeautifulSoup) → เอาทุกรูป (ads/logo/thumbnail ปน) + reader site ที่ JS-render มัก scrape ไม่ได้รูป
+- เปลี่ยนเป็นรับ **`images: list[str]`** (image URLs ที่ client/extension เก็บจาก DOM ที่ render แล้ว ตามไอเดีย click+class/sibling ที่หารือกัน) — ย้ายหน้าที่ "หารูปมังงะ" ไปฝั่ง client ที่เห็น DOM จริง
+- endpoint ส่ง list เข้า `pipe.run_batch` ตรงๆ (`load_image` ดึง http URL ได้อยู่แล้ว); คืน base64 list ที่ **index-aligned กับ request** (`None` สำหรับรูปที่แปลไม่สำเร็จ) → client map ผลกลับไป swap รูปต้นทาง in-place ได้
+- ลบ import ที่ไม่ใช้แล้ว `BeautifulSoup` + `requests` จาก main.py
+- decision: tempomunkey ใส่รูปเป็น static `<img src>` URL เข้าถึงได้ → server ดึงเองได้
+- หมายเหตุ: extension content-script (เก็บ URL จาก DOM) เป็น deliverable ฝั่ง client แยก; ถ้า CDN กัน hotlink ให้ client ส่ง bytes แทน URL (future); ควรเพิ่ม SSRF allowlist ก่อน production
+- verify: `py_compile` + `import main` (สร้าง app+pipeline+EasyOCR จริง, route `/translate/` พร้อม, ไม่มี scrape refs) + `pytest` 45 passed
+
+**ไฟล์ที่แก้ไข:**
+- `main.py` — `TranslateRequest` → `images: list[str]`; endpoint ใช้ run_batch + คืน aligned base64; ลบ bs4/requests
+- `README.md` — อัปเดตตัวอย่าง `/translate/` เป็น image-list + index-aligned response + hotlink note
+
+---
+
+## [2026-06-09 14:37] Update requirement.txt + เพิ่ม Docker สำหรับ deploy API
+
+**ประเภท:** เพิ่ม feature / refactor
+
+**รายละเอียด:**
+- **requirement.txt เขียนใหม่** — pin version ตาม env จริง อิงจาก imports ที่ code ใช้ตอน startup; ตัดที่ไม่จำเป็น: `paddlepaddle`+`paddleocr` (default ใช้ EasyOCR ไม่ import paddle ตอน startup — ใส่เป็น comment optional), `tiktoken` (วัด token ครั้งเดียว), `pytest` (อยู่ `requirements-dev.txt`); เปลี่ยน `opencv-python` → `opencv-python-headless` (server ไม่ต้อง GUI/libGL)
+- **ตัด matplotlib ออกจาก runtime** — lazy import: ย้าย `import matplotlib.pyplot` เข้าในฟังก์ชัน debug viz (`show_image_with_boxes`/`show_image_with_polygons`/`show_images` ใน `utils/common.py`, `show_masks` ใน `inpainting/inpainter.py`) เพราะ API path ไม่เรียก → image ไม่ต้องมี matplotlib (verify แล้วไม่มี `plt` ที่ module level)
+- **main.py อ่าน config จาก env** — `DEVICE`/`PROVIDER`/`MODEL` (default `cpu`/`openrouter`/`google/gemini-2.5-flash`) แทน hardcode `device="cuda"` → image เดียวรันได้ทั้ง CPU/GPU โดยไม่แก้ code
+- **Docker:** `Dockerfile` (CPU, `python:3.12-slim` + `libglib2.0-0` + torch CPU + pre-download EasyOCR en models ให้ self-contained); `Dockerfile.gpu` (base `pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime`, `DEVICE=cuda`, ต้อง `--gpus all`); model `best_diplom.pt` (6.3MB) + font ถูก bake เข้า image ผ่าน COPY
+- **ไฟล์ประกอบ:** `.dockerignore` (exclude .git/notebooks/tests/.env/MangaTVL_ENV แต่**เก็บ assets**), `docker-compose.yml` (service + env_file + port 8000 + GPU block comment), `.env.example` เพิ่ม DEVICE/PROVIDER/MODEL, README เพิ่มหัวข้อ Run with Docker
+- verify: `py_compile` + `from pipeline import Pipeline` ผ่าน + `pytest` 45 passed; Docker daemon ไม่ได้รันใน dev → build จริงให้ผู้ใช้รัน (`docker compose up --build`)
+
+**ไฟล์ที่แก้ไข:**
+- `requirement.txt` — เขียนใหม่ pinned + lean
+- `manga_translator/utils/common.py`, `manga_translator/inpainting/inpainter.py` — lazy import matplotlib
+- `main.py` — DEVICE/PROVIDER/MODEL จาก env
+- `Dockerfile`, `Dockerfile.gpu`, `.dockerignore`, `docker-compose.yml` — (ไฟล์ใหม่)
+- `.env.example` — เพิ่ม DEVICE/PROVIDER/MODEL
+- `README.md` — หัวข้อ Run with Docker
+
+---
+
 ## [2026-06-08 15:31] เพิ่ม test_pipeline.ipynb สำหรับทดสอบ pipeline แบบ interactive
 
 **ประเภท:** เพิ่ม feature (test)
