@@ -7,7 +7,7 @@ from .translator import AsyncTranslatorBase
 
 
 class AsyncGeminiTranslator(AsyncTranslatorBase):
-    async def _translate(self, inputs: str, image=None):
+    async def _translate(self, inputs: str, image=None, *, model=None, system_prompt=None):
         contents = [inputs]
         if image is not None:
             # Send the image as a real Part, not a data-URI string (which would be
@@ -17,9 +17,9 @@ class AsyncGeminiTranslator(AsyncTranslatorBase):
 
         response = await self._call_with_retry(
             lambda: self.client.aio.models.generate_content(
-                model=self.model,
+                model=model,
                 contents=contents,
-                config=GenerateContentConfig(system_instruction=self.system_prompt),
+                config=GenerateContentConfig(system_instruction=system_prompt),
             )
         )
         return response.text if response else None

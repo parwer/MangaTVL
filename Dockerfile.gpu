@@ -1,0 +1,34 @@
+# MangaTVL API — GPU (CUDA) image.
+# Base image already ships Python 3.12 + CUDA-enabled torch/torchvision.
+# Run with:  docker run --gpus all -e DEVICE=cuda -p 8000:8000 --env-file .env mangatvl-api-gpu
+FROM pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    # base image's Python is PEP 668 "externally managed"; allow pip into it
+    # (this is a dedicated container, so installing into the system env is fine)
+    PIP_BREAK_SYSTEM_PACKAGES=1 \
+    MPLBACKEND=Agg \
+    DEVICE=cuda
+
+WORKDIR /app
+
+# System libs required by opencv-python (libGL/libxcb/X) for `import cv2`
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libglib2.0-0 libgl1 libxcb1 libsm6 libxext6 libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# torch/torchvision already in the base image — install the rest.
+# (pip will skip torch/torchvision since they are already satisfied.)
+COPY requirement.txt .
+RUN pip install --upgrade pip && pip install -r requirement.txt
+
+COPY . .
+
+# Pre-download EasyOCR English models (weights are the same for CPU/GPU)
+RUN python -c "import easyocr; easyocr.Reader(['en'], gpu=False)"
+
+EXPOSE 8000
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

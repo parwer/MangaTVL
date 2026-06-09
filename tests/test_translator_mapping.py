@@ -20,8 +20,17 @@ class FakeTranslator(AsyncTranslatorBase):
 
     def __init__(self, fake_response):
         self._fake_response = fake_response
+        # minimal defaults that translate() / _system_prompt() rely on
+        self.model = None
+        self.user_prompt = ""
+        self.guidelines = ""
+        self.from_lang = "English"
+        self.to_lang = "Thai"
+        self._prompt_cache = {}
+        self.last_kwargs = None
 
-    async def _translate(self, inputs, image=None):
+    async def _translate(self, inputs, image=None, *, model=None, system_prompt=None):
+        self.last_kwargs = {"model": model, "system_prompt": system_prompt}
         return self._fake_response
 
 
@@ -85,6 +94,22 @@ def test_none_response_falls_back_to_all_originals():
 
 def test_empty_ocr_returns_empty():
     assert _run("[]", []) == []
+
+
+def test_per_call_model_override_passed_to_translate():
+    t = FakeTranslator(json.dumps([{"text_no": 0, "translated_text": "ก"}]))
+    asyncio.run(t.translate([_ocr("AAA")], model="some/model"))
+    assert t.last_kwargs["model"] == "some/model"
+
+
+def test_per_call_language_builds_distinct_system_prompts():
+    t = FakeTranslator(json.dumps([{"text_no": 0, "translated_text": "x"}]))
+    asyncio.run(t.translate([_ocr("AAA")], to_lang="Thai"))
+    sp_thai = t.last_kwargs["system_prompt"]
+    asyncio.run(t.translate([_ocr("AAA")], to_lang="Japanese"))
+    sp_jp = t.last_kwargs["system_prompt"]
+    assert sp_thai != sp_jp                      # language override changes the prompt
+    assert set(t._prompt_cache.keys()) == {("English", "Thai"), ("English", "Japanese")}
 
 
 def test_result_count_always_matches_input():

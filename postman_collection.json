@@ -1,0 +1,48 @@
+{
+  "info": {
+    "name": "MangaTVL API",
+    "description": "Mock requests for POST /translate/. The server's load_image accepts both http(s) URLs and local paths (relative to the server's working dir = project root / /app in Docker), so the bundled sample images work out of the box.\n\nNote: the translation stage needs an LLM API key in .env. Without a key the pipeline still returns rendered images, but text falls back to the original (untranslated).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000" }
+  ],
+  "item": [
+    {
+      "name": "translate — bundled samples (text only)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "{{baseUrl}}/translate/", "host": ["{{baseUrl}}"], "path": ["translate", ""] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"images\": [\n    \"manga_translator/assets/images/17.jpg\",\n    \"manga_translator/assets/images/5.jpg\"\n  ],\n  \"process_image\": false\n}"
+        }
+      }
+    },
+    {
+      "name": "translate — with visual context (process_image=true)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "{{baseUrl}}/translate/", "host": ["{{baseUrl}}"], "path": ["translate", ""] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"images\": [\n    \"manga_translator/assets/images/17.jpg\"\n  ],\n  \"process_image\": true\n}"
+        }
+      }
+    },
+    {
+      "name": "translate — by public image URL",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "{{baseUrl}}/translate/", "host": ["{{baseUrl}}"], "path": ["translate", ""] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"images\": [\n    \"https://raw.githubusercontent.com/zyddnys/manga-image-translator/main/demo/image/original.png\"\n  ],\n  \"process_image\": false\n}"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+# Keep the build context small. NOTE: do NOT exclude manga_translator/assets/
+# (the YOLO model best_diplom.pt and the Thai font must be baked into the image).
+
+.git
+.gitignore
+.dockerignore
+.env
+*.env
+
+# notebooks / dev / docs
+*.ipynb
+.ipynb_checkpoints/
+tests/
+requirements-dev.txt
+pytest.ini
+*.md
+
+# python caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# local embedded interpreter (not part of the image)
+MangaTVL_ENV/
+../MangaTVL_ENV/

@@ -1,0 +1,25 @@
+{
+  "_comment": "Fonts available to the renderer, selectable per request via the 'font' key. 'scripts' lists which writing systems each font actually has glyphs for (verified via cmap) so a font is only offered for target languages it can render. 'defaults' maps a target language (canonical name from languages.json) to the font key used when the request doesn't specify one; 'latin' is the fallback for any space-delimited Latin language. All fonts are OFL/Apache licensed from Google Fonts.",
+  "defaults": {
+    "thai": "thsarabun",
+    "japanese": "yusei_magic",
+    "chinese": "zhi_mang_xing",
+    "chinese_traditional": "zhi_mang_xing",
+    "korean": "nanum_pen",
+    "latin": "comic_neue"
+  },
+  "fonts": [
+    { "key": "thsarabun",        "file": "THSarabunNew.ttf",          "label": "TH Sarabun (clean)",           "scripts": ["latin", "thai"] },
+    { "key": "itim",             "file": "Itim-Regular.ttf",          "label": "Itim (Thai handwriting)",      "scripts": ["latin", "thai"] },
+    { "key": "mali",             "file": "Mali-Regular.ttf",          "label": "Mali (Thai rounded)",          "scripts": ["latin", "thai"] },
+    { "key": "sriracha",         "file": "Sriracha-Regular.ttf",      "label": "Sriracha (Thai brush)",        "scripts": ["latin", "thai"] },
+    { "key": "charm",            "file": "Charm-Regular.ttf",         "label": "Charm (Thai handwriting)",     "scripts": ["latin", "thai"] },
+    { "key": "bangers",          "file": "Bangers-Regular.ttf",       "label": "Bangers (comic caps)",         "scripts": ["latin"] },
+    { "key": "comic_neue",       "file": "ComicNeue-Regular.ttf",     "label": "Comic Neue",                   "scripts": ["latin"] },
+    { "key": "permanent_marker", "file": "PermanentMarker-Regular.ttf","label": "Permanent Marker",            "scripts": ["latin"] },
+    { "key": "patrick_hand",     "file": "PatrickHand-Regular.ttf",   "label": "Patrick Hand",                 "scripts": ["latin"] },
+    { "key": "yusei_magic",      "file": "YuseiMagic-Regular.ttf",    "label": "Yusei Magic (Japanese)",       "scripts": ["latin", "japanese"] },
+    { "key": "zhi_mang_xing",    "file": "ZhiMangXing-Regular.ttf",   "label": "Zhi Mang Xing (Chinese)",      "scripts": ["latin", "chinese"] },
+    { "key": "nanum_pen",        "file": "NanumPenScript-Regular.ttf","label": "Nanum Pen (Korean)",           "scripts": ["latin", "korean"] }
+  ]
+}

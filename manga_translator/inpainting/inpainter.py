@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 import numpy as np
 import cv2
 from PIL import Image
-import matplotlib.pyplot as plt
 
 from ..utils.common import cv2pil, pil2cv
 
@@ -133,6 +132,8 @@ class InpainterBase(ABC):
         return mask
 
     def show_masks(self, image, inputs: list[OCRResult], expand_margin=2, masked_image=None, figsize=(8, 8)):
+        import matplotlib.pyplot as plt  # debug-only; lazy import keeps it off the runtime path
+
         image = pil2cv(image)
         inputs = self.parse_inputs(inputs)
         mask = self._masking(image, inputs, expand_margin=expand_margin)
