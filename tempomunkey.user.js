@@ -41,6 +41,7 @@
     text_scale: gmGet("mtvl_text_scale", ""), // >1 = bigger text ("" = server default)
     upscale: gmGet("mtvl_upscale", ""),     // output upscale factor ("" / 1 = off)
     upscaler: gmGet("mtvl_upscaler", ""),   // "" = lanczos (fast) | "realesrgan" (AI)
+    custom_instruction: gmGet("mtvl_custom_instruction", ""), // extra localization instruction
     api_key: gmGet("mtvl_api_key", ""),
   };
 
@@ -63,9 +64,11 @@
     .mtvl-status { margin-top:8px; font-size:12px; color:#bbb; min-height:16px; }
     .mtvl-bar details { margin:6px 0; }
     .mtvl-bar summary { cursor:pointer; color:#9cf; font-size:12px; }
-    .mtvl-bar input[type=text], .mtvl-bar input[type=password], .mtvl-bar select {
+    .mtvl-bar input[type=text], .mtvl-bar input[type=password], .mtvl-bar input[type=number],
+    .mtvl-bar select, .mtvl-bar textarea {
       width:100%; margin:3px 0; padding:5px; border:0; border-radius:5px;
       background:#2a2a30; color:#eee; font-size:12px; box-sizing:border-box; }
+    .mtvl-bar textarea { resize:vertical; min-height:44px; font-family:inherit; }
   `;
   const style = document.createElement("style");
   style.textContent = css;
@@ -167,6 +170,7 @@
         <option value="">upscale: fast (lanczos)</option>
         <option value="realesrgan">upscale: AI (real-esrgan, slow)</option>
       </select>
+      <textarea id="mtvl-custom" rows="2" placeholder="custom instruction (e.g. keep honorifics, polite tone)"></textarea>
       <input type="password" id="mtvl-key" placeholder="API key (blank = server env)">
     </details>
     <div class="mtvl-status" id="mtvl-status"></div>
@@ -182,11 +186,13 @@
   const scaleEl = bar.querySelector("#mtvl-scale");
   const upscaleEl = bar.querySelector("#mtvl-upscale");
   const upscalerEl = bar.querySelector("#mtvl-upscaler");
+  const customEl = bar.querySelector("#mtvl-custom");
   const keyEl = bar.querySelector("#mtvl-key");
   provEl.value = settings.provider; modelEl.value = settings.model;
   fromlangEl.value = settings.from_lang; tolangEl.value = settings.to_lang; keyEl.value = settings.api_key;
   scaleEl.value = settings.text_scale;
   upscaleEl.value = settings.upscale; upscalerEl.value = settings.upscaler;
+  customEl.value = settings.custom_instruction;
   provEl.onchange = () => gmSet("mtvl_provider", (settings.provider = provEl.value));
   modelEl.onchange = () => gmSet("mtvl_model", (settings.model = modelEl.value.trim()));
   fromlangEl.onchange = () => gmSet("mtvl_from_lang", (settings.from_lang = fromlangEl.value.trim()));
@@ -195,6 +201,7 @@
   scaleEl.onchange = () => gmSet("mtvl_text_scale", (settings.text_scale = scaleEl.value.trim()));
   upscaleEl.onchange = () => gmSet("mtvl_upscale", (settings.upscale = upscaleEl.value.trim()));
   upscalerEl.onchange = () => gmSet("mtvl_upscaler", (settings.upscaler = upscalerEl.value));
+  customEl.onchange = () => gmSet("mtvl_custom_instruction", (settings.custom_instruction = customEl.value.trim()));
   keyEl.onchange = () => gmSet("mtvl_api_key", (settings.api_key = keyEl.value.trim()));
 
   // Populate the font picker from the server so it stays in sync with fonts.json.
@@ -265,6 +272,7 @@
       payload.upscale = parseFloat(settings.upscale);
       if (settings.upscaler) payload.upscaler = settings.upscaler;
     }
+    if (settings.custom_instruction) payload.custom_instruction = settings.custom_instruction;
     if (settings.api_key) payload.api_key = settings.api_key;
 
     const total = imgs.length;

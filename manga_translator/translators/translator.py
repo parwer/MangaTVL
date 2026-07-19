@@ -6,7 +6,7 @@ from typing import Optional
 
 from ..utils.common import convert_img_to_base64
 from .utils.common import parse_response
-from .utils.prompt import get_sys_prompt, get_ocr_prompt
+from .utils.prompt import get_sys_prompt, get_ocr_prompt, DEFAULT_GUIDELINE_PROMPT
 
 from ..schemas.interface import TranslationResult, OCRResult
 
@@ -42,17 +42,38 @@ class AsyncTranslatorBase(ABC):
         self.max_tokens = max_tokens
         self.RATE_LIMIT_FLAGS = asyncio.Event()
 
-    def _system_prompt(self, from_lang, to_lang):
-        key = (from_lang, to_lang)
+    def _merge_guidelines(self, custom_instruction):
+        """Effective guidelines for the system prompt: the base guidelines (this
+        translator's, or the default set) plus any per-request custom instruction
+        from the caller, marked as highest priority so the model heeds it."""
+        base = self.guidelines or DEFAULT_GUIDELINE_PROMPT
+        if not custom_instruction:
+            return base
+        return (f"{base}\n\nAdditional user instruction (highest priority, "
+                f"override the above if they conflict): {custom_instruction}")
+
+    def _system_prompt(self, from_lang, to_lang, custom_instruction=None):
+        key = (from_lang, to_lang, custom_instruction or "")
         if key not in self._prompt_cache:
             self._prompt_cache[key] = get_sys_prompt(
-                user_prompt=self.user_prompt, guidelines=self.guidelines,
+                user_prompt=self.user_prompt,
+                guidelines=self._merge_guidelines(custom_instruction),
                 from_lang=from_lang, to_lang=to_lang,
             )
         return self._prompt_cache[key]
 
     async def translate(self, ocr_result: list[OCRResult], image=None, *,
-                        model=None, from_lang=None, to_lang=None) -> list[TranslationResult]:
+                        model=None, from_lang=None, to_lang=None,
+                        custom_instruction=None,
+                        capture: dict | None = None) -> list[TranslationResult]:
+        """``custom_instruction`` (optional): a free-text instruction from the
+        caller appended to the localization guidelines for this call only.
+
+        ``capture`` (optional): when a dict is passed it is filled with the raw
+        request/response of this call — system prompt, the preprocessed user input,
+        whether an image was attached, the raw model response, token usage, the
+        parsed ``text_no`` map, and any error. Production callers omit it (no
+        behaviour change); the eval harness passes a sink to log everything."""
         if not ocr_result:
             return []
 
@@ -60,14 +81,25 @@ class AsyncTranslatorBase(ABC):
             image = convert_img_to_base64(image)
 
         model = model or self.model
-        system_prompt = self._system_prompt(from_lang or self.from_lang, to_lang or self.to_lang)
+        system_prompt = self._system_prompt(from_lang or self.from_lang,
+                                            to_lang or self.to_lang,
+                                            custom_instruction=custom_instruction)
 
         inputs = self._preprocess(ocr_result)
+        if capture is not None:
+            capture.update(model=model, system_prompt=system_prompt,
+                           user_input=inputs, image_attached=image is not None)
+        # Only forward `capture` when asked, so a custom `_translate` override
+        # that doesn't accept the kwarg keeps working (full backward-compat).
+        extra = {"capture": capture} if capture is not None else {}
         try:
-            response = await self._translate(inputs, image=image, model=model, system_prompt=system_prompt)
+            response = await self._translate(inputs, image=image, model=model,
+                                             system_prompt=system_prompt, **extra)
         except Exception as e:
             print(f"[translate] API call failed: {e}")
             response = None
+            if capture is not None:
+                capture["error"] = str(e)
 
         # Map by text_no (not positional zip) so missing/extra/reordered items
         # from the LLM don't shift every translation into the wrong bubble.
@@ -79,6 +111,8 @@ class AsyncTranslatorBase(ABC):
                         by_no[int(r["text_no"])] = r["translated_text"]
                     except (ValueError, TypeError):
                         continue
+        if capture is not None:
+            capture["parsed"] = dict(by_no)
 
         results = []
         for i, ocr_item in enumerate(ocr_result):
@@ -116,15 +150,32 @@ class AsyncTranslatorBase(ABC):
         return get_ocr_prompt(user_prompt)
 
     @abstractmethod
-    async def _translate(self, inputs: str, image=None, *, model=None, system_prompt=None):
+    async def _translate(self, inputs: str, image=None, *, model=None, system_prompt=None, capture=None):
         raise NotImplementedError
+
+
+def _usage_to_dict(usage):
+    """Best-effort conversion of a provider usage object to a plain dict."""
+    if usage is None:
+        return None
+    for attr in ("model_dump", "to_dict", "dict"):
+        fn = getattr(usage, attr, None)
+        if callable(fn):
+            try:
+                return fn()
+            except Exception:
+                pass
+    keys = ("prompt_tokens", "completion_tokens", "total_tokens",
+            "prompt_token_count", "candidates_token_count", "total_token_count")
+    out = {k: getattr(usage, k) for k in keys if getattr(usage, k, None) is not None}
+    return out or str(usage)
 
 
 class OpenAICompatibleTranslator(AsyncTranslatorBase):
     """Shared implementation for any OpenAI-compatible chat client (OpenRouter,
     Groq, ...) that exposes ``client.chat.completions.create``."""
 
-    async def _translate(self, inputs: str, image=None, *, model=None, system_prompt=None):
+    async def _translate(self, inputs: str, image=None, *, model=None, system_prompt=None, capture=None):
         if image is not None:
             # Image must be a multimodal content part, not a raw data-URI string
             # in `content` (that gets tokenized as text -> ~2k-4k tokens/image).
@@ -147,4 +198,8 @@ class OpenAICompatibleTranslator(AsyncTranslatorBase):
                 max_tokens=self.max_tokens,
             )
         )
-        return response.choices[0].message.content if response else None
+        text = response.choices[0].message.content if response else None
+        if capture is not None:
+            capture["raw_response"] = text
+            capture["usage"] = _usage_to_dict(getattr(response, "usage", None)) if response else None
+        return text

@@ -7,7 +7,7 @@ from .translator import AsyncTranslatorBase
 
 
 class AsyncGeminiTranslator(AsyncTranslatorBase):
-    async def _translate(self, inputs: str, image=None, *, model=None, system_prompt=None):
+    async def _translate(self, inputs: str, image=None, *, model=None, system_prompt=None, capture=None):
         contents = [inputs]
         if image is not None:
             # Send the image as a real Part, not a data-URI string (which would be
@@ -22,4 +22,9 @@ class AsyncGeminiTranslator(AsyncTranslatorBase):
                 config=GenerateContentConfig(system_instruction=system_prompt),
             )
         )
-        return response.text if response else None
+        text = response.text if response else None
+        if capture is not None:
+            from .translator import _usage_to_dict
+            capture["raw_response"] = text
+            capture["usage"] = _usage_to_dict(getattr(response, "usage_metadata", None)) if response else None
+        return text

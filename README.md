@@ -133,7 +133,8 @@ Once running, the API is at `http://localhost:8000` (interactive docs at `/docs`
   "font": "itim",
   "text_scale": 1.2,
   "upscale": 2,
-  "upscaler": "lanczos"
+  "upscaler": "lanczos",
+  "custom_instruction": "keep character honorifics; use a polite tone"
 }
 ```
 
@@ -147,6 +148,7 @@ Once running, the API is at `http://localhost:8000` (interactive docs at `/docs`
 - `upscale` enlarges the **returned page** by this factor (`1` = off, max `4`); `upscaler` picks how:
   - `lanczos` (default) — fast, no extra deps. Bigger page (our rendered text stays sharp); the source artwork is enlarged but not deblurred.
   - `realesrgan` — AI super-resolution (anime-tuned) that actually sharpens/deblurs blurry source art. Heavy and slow on CPU; needs `realesrgan`+`basicsr` (not installed by default — see `requirement.txt`). If unavailable it **falls back to LANCZOS**.
+- `custom_instruction` is a free-text localization instruction appended to the translator's guidelines for that request (e.g. `"keep -san/-chan honorifics"`, `"use casual slang"`, `"translate SFX literally"`). It's marked highest-priority in the system prompt; omit for the default guidelines.
 
 #### Fonts
 
@@ -208,7 +210,7 @@ Response:
 | **Interrupt** | cancel the in-flight translation request |
 | **Revert all** | restore the original (untranslated) images |
 | **Rescan images** | re-detect images (use after lazy-loaded pages appear) |
-| **Settings** | per-request `provider` / `model` / **source language** / target language / **font** / **text size** / **upscale** (factor + fast/AI) / `api_key` (persisted on your machine; sent with each translate request, blank = server default). Set source language to `japanese` to use manga-ocr; raise **text size** (e.g. 1.4) if translations are too small; set **upscale** (e.g. 2) to enlarge low-res pages. The font list is fetched from the server's `GET /fonts/`. |
+| **Settings** | per-request `provider` / `model` / **source language** / target language / **font** / **text size** / **upscale** (factor + fast/AI) / **custom instruction** / `api_key` (persisted on your machine; sent with each translate request, blank = server default). Set source language to `japanese` to use manga-ocr; raise **text size** (e.g. 1.4) if translations are too small; set **upscale** (e.g. 2) to enlarge low-res pages. The font list is fetched from the server's `GET /fonts/`. |
 
 > Cross-origin/mixed-content (https page → http localhost) is handled via `GM_xmlhttpRequest`. Pages are streamed back via `/translate/stream/` and swapped in place one by one (the script parses the NDJSON in `onprogress`). **Interrupt** stops the client from waiting and frees the UI, but work the server already started keeps running in the background. If the source CDN blocks server-side hotlinking, translation returns `null` (✕) for that page (future: have the script upload image bytes instead of URLs).
 
@@ -233,6 +235,26 @@ result.save("translated.jpg")
 ```
 
 `Pipeline.run` handles a single image; `Pipeline.run_batch` processes many concurrently (API concurrency is throttled by `CONCURRENT_REQUESTS`).
+
+---
+
+## Scraping an evaluation set
+
+[`scrape_images.py`](scrape_images.py) collects page images into a folder so you can build a test set for the translator. It drives a real (headless) browser via **Playwright**, scrolls to trigger lazy-loading, grabs `<img>`s ≥ `--min-width` in reading order, and downloads them through the browser session (cookies + referer) to get past hotlink protection. SVG/non-raster images are skipped.
+
+```powershell
+# one-time setup
+..\MangaTVL_ENV\python.exe -m pip install playwright
+..\MangaTVL_ENV\python.exe -m playwright install chromium
+
+# scrape one or more pages -> eval/scraped/<page-slug>/001.jpg, 002.jpg, ...
+..\MangaTVL_ENV\python.exe scrape_images.py "https://reader.example/chapter/1"
+..\MangaTVL_ENV\python.exe scrape_images.py --urls-file urls.txt --min-width 500 --limit 20
+```
+
+It force-loads lazy images (promotes `data-src` → `src`, scrolls to the bottom) so chapters that defer off-screen pages still get fully captured.
+
+Options: `--out` (default `eval/scraped`), `--min-width` (default 400), `--selector` (CSS, e.g. `img.comic-image`, for precision when a page has many non-content images), `--limit` per page, `--scroll-rounds`, `--delay`, `--headful` (show the window, e.g. to pass a captcha). Output under `eval/scraped/` is gitignored.
 
 ---
 

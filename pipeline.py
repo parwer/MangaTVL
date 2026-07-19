@@ -135,7 +135,7 @@ class Pipeline:
     async def _run_on_image(self, image: Image.Image, process_image: bool = False, *,
                             provider=None, api_key=None, model=None,
                             from_lang=None, to_lang=None, font=None, text_scale=None,
-                            upscale=None, upscaler=None) -> Image.Image:
+                            upscale=None, upscaler=None, custom_instruction=None) -> Image.Image:
         """Run the full pipeline on a single already-loaded image."""
         detection_result = self.det_model.detect(image)
         if not detection_result:
@@ -150,6 +150,7 @@ class Pipeline:
         translation_result = await translator.translate(
             ocr_result=ocr_result, image=context_image,
             model=model, from_lang=from_lang, to_lang=to_lang,
+            custom_instruction=custom_instruction,
         )
         inpainted_image = self.inpainter.inpaint(image, translation_result)
         rendered = self.renderer.render(inpainted_image, translation_result,
@@ -161,7 +162,7 @@ class Pipeline:
     async def run(self, image_path, process_image: bool = False, *,
                   provider=None, api_key=None, model=None,
                   from_lang=None, to_lang=None, font=None, text_scale=None,
-                  upscale=None, upscaler=None) -> Optional[Image.Image]:
+                  upscale=None, upscaler=None, custom_instruction=None) -> Optional[Image.Image]:
         try:
             image = load_image(image_path)
         except Exception as e:
@@ -170,19 +171,19 @@ class Pipeline:
         return await self._run_on_image(
             image, process_image, provider=provider, api_key=api_key,
             model=model, from_lang=from_lang, to_lang=to_lang, font=font, text_scale=text_scale,
-            upscale=upscale, upscaler=upscaler,
+            upscale=upscale, upscaler=upscaler, custom_instruction=custom_instruction,
         )
 
     async def run_batch(self, image_paths: List[str], process_image: bool = False,
                         show_progress: bool = True, *, provider=None, api_key=None,
                         model=None, from_lang=None, to_lang=None, font=None, text_scale=None,
-                        upscale=None, upscaler=None) -> List[Image.Image]:
+                        upscale=None, upscaler=None, custom_instruction=None) -> List[Image.Image]:
         """Process multiple images concurrently. API-call concurrency is throttled by the
         translator's semaphore (CONCURRENT_REQUESTS)."""
         tasks = [
             self.run(path, process_image, provider=provider, api_key=api_key,
                      model=model, from_lang=from_lang, to_lang=to_lang, font=font, text_scale=text_scale,
-                     upscale=upscale, upscaler=upscaler)
+                     upscale=upscale, upscaler=upscaler, custom_instruction=custom_instruction)
             for path in image_paths
         ]
         if show_progress:
@@ -192,7 +193,7 @@ class Pipeline:
     async def run_batch_stream(self, image_paths: List[str], process_image: bool = False, *,
                                provider=None, api_key=None, model=None,
                                from_lang=None, to_lang=None, font=None, text_scale=None,
-                               upscale=None, upscaler=None):
+                               upscale=None, upscaler=None, custom_instruction=None):
         """Like run_batch, but yields ``(index, image)`` as each image finishes
         (completion order, not request order) so callers can stream results
         instead of waiting for the whole batch. A failed image yields
@@ -202,7 +203,7 @@ class Pipeline:
                 img = await self.run(
                     path, process_image, provider=provider, api_key=api_key,
                     model=model, from_lang=from_lang, to_lang=to_lang, font=font, text_scale=text_scale,
-                    upscale=upscale, upscaler=upscaler,
+                    upscale=upscale, upscaler=upscaler, custom_instruction=custom_instruction,
                 )
                 return i, img
             except Exception as e:

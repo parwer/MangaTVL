@@ -39,3 +39,6 @@ google-genai==2.6.0
 # Not installed by default: basicsr can conflict with newer torchvision. The
 # pipeline lazily imports it and falls back to LANCZOS if it's missing/broken.
 # pip install realesrgan==0.3.0 basicsr==1.4.2
+
+# --- optional: evaluation image scraper (scrape_images.py only, not the API) ---
+# pip install playwright==1.60.0  &&  python -m playwright install chromium

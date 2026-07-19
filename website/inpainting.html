@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stage 4 · Inpainting — MangaTVL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+<button class="menu-btn" aria-label="menu">☰</button>
+<div class="layout">
+
+  <aside class="sidebar">
+    <a class="brand" href="index.html">
+      <span class="logo">漫</span>
+      <span><span class="name">MangaTVL</span><br><span class="sub">EN → TH manga translator</span></span>
+    </a>
+    <nav class="nav-group">
+      <h4>เริ่มต้น</h4>
+      <a class="nav-link" href="index.html"><span class="num">◎</span> ภาพรวม &amp; ที่มา</a>
+      <a class="nav-link" href="architecture.html"><span class="num">⌗</span> สถาปัตยกรรม &amp; API</a>
+    </nav>
+    <nav class="nav-group">
+      <h4>Pipeline · 5 สเตจ</h4>
+      <a class="nav-link" data-stage="detect"  href="detection.html"><span class="num">1</span> Detection</a>
+      <a class="nav-link" data-stage="ocr"     href="ocr.html"><span class="num">2</span> OCR</a>
+      <a class="nav-link" data-stage="trans"   href="translation.html"><span class="num">3</span> Translation</a>
+      <a class="nav-link active" data-stage="inpaint" href="inpainting.html"><span class="num">4</span> Inpainting</a>
+      <a class="nav-link" data-stage="render"  href="rendering.html"><span class="num">5</span> Rendering</a>
+    </nav>
+    <nav class="nav-group">
+      <h4>เพิ่มเติม</h4>
+      <a class="nav-link" href="eval.html"><span class="num">📊</span> Evaluation</a>
+      <a class="nav-link" href="roadmap.html"><span class="num">⚑</span> ปัญหา &amp; อนาคต</a>
+    </nav>
+  </aside>
+
+  <main class="main">
+  <div class="content">
+
+    <header class="page-head">
+      <span class="kicker"><span class="dot" style="background:var(--c-inpaint)"></span> Stage 04 · Inpainting</span>
+      <h1>ลบข้อความเดิม โดยไม่กินเส้นขอบฟอง</h1>
+      <p class="lead">ใช้ <strong>border-uniformity safe-fill</strong> — หด polygon เข้าทีละขั้นแล้ววัดความสม่ำเสมอของ pixel ที่ขอบ เพื่อหา mask ที่อยู่ "ในเนื้อขาวของฟอง" พอดี ไม่ทาบเส้นขอบดำ</p>
+    </header>
+
+    <div class="io-flow">
+      <span class="io-chip">image + TranslationResult[]</span>
+      <span class="io-arrow">→ inpaint() →</span>
+      <span class="io-chip" style="border-color:var(--c-inpaint)">cleaned image</span>
+    </div>
+
+    <h2>ปัญหา: polygon ของ YOLO-seg มัก "ล้น" เลยขอบฟอง</h2>
+    <div class="callout problem">
+      <span class="ci">🔴</span>
+      <p><strong>Inpaint กินขอบ / smear</strong> — polygon จาก segmentation มักล้ำออกนอกเส้นฟองนิด ๆ ถ้าทาขาวตาม polygon ตรง ๆ จะลบเส้นขอบดำของฟองไปด้วย เกิดรอยเลอะ</p>
+    </div>
+
+    <h2>วิธีแก้: หด polygon + วัด std ของขอบ</h2>
+    <p>แนวคิด (adapt จาก PanelCleaner): พื้นที่ภายในฟองเป็นสีขาวสม่ำเสมอ ส่วนเส้นขอบเป็นสีดำ ดังนั้นถ้าเราหด (erode) polygon เข้าไปเรื่อย ๆ แล้ววัด <strong>ส่วนเบี่ยงเบนมาตรฐาน (std) ของ pixel ตามแนวขอบ mask</strong> — ขอบที่ std ต่ำ = อยู่ในเนื้อขาวล้วน (ปลอดภัย) ส่วนขอบที่ std สูง = ยังพาดเส้นดำอยู่ ลองลากแถบด้านล่าง:</p>
+
+    <!-- VIZ: erode slider -->
+    <div class="viz">
+      <div class="viz-title">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/></svg>
+        Adaptive erode · ลากเพื่อหด polygon เข้า
+      </div>
+
+      <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center">
+        <svg viewBox="0 0 280 220" width="280" style="flex:0 0 280px;max-width:100%">
+          <rect width="280" height="220" fill="#0e1320" rx="8"/>
+          <!-- bubble interior white -->
+          <ellipse cx="140" cy="110" rx="95" ry="72" fill="#f4f1ea"/>
+          <!-- bubble black outline -->
+          <ellipse cx="140" cy="110" rx="95" ry="72" fill="none" stroke="#111" stroke-width="5"/>
+          <!-- original text being erased -->
+          <text id="bub-text" x="140" y="116" text-anchor="middle" font-family="JetBrains Mono" font-size="14" fill="#222" font-weight="700">OLD TEXT</text>
+          <!-- segmentation polygon (overshoots a bit) -->
+          <ellipse cx="140" cy="110" rx="104" ry="80" fill="none" stroke="var(--c-detect)" stroke-width="1.5" stroke-dasharray="4 3"/>
+          <text x="140" y="24" text-anchor="middle" class="lbl" fill="var(--c-detect)">segmentation (ล้นขอบ)</text>
+          <!-- eroded mask (animated by slider) -->
+          <ellipse id="erode-ring" cx="140" cy="110" rx="104" ry="80" fill="none" stroke="var(--c-inpaint)" stroke-width="2.5"/>
+        </svg>
+
+        <div style="flex:1;min-width:240px">
+          <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text-dim)">
+            <span>erode steps: <strong id="erode-val" style="color:var(--text)">0</strong></span>
+            <span>border std: <strong id="std-val" style="color:var(--c-detect)">48</strong></span>
+          </div>
+          <input id="erode-slider" type="range" min="0" max="6" value="0" style="width:100%;margin:14px 0;accent-color:var(--c-inpaint)">
+          <!-- std bar -->
+          <div style="height:14px;background:var(--bg-3);border-radius:7px;overflow:hidden;position:relative;border:1px solid var(--border)">
+            <div id="std-bar" style="height:100%;width:100%;background:var(--c-detect);transition:width .2s,background .2s"></div>
+            <div style="position:absolute;left:52%;top:-4px;bottom:-4px;width:2px;background:var(--text);opacity:.6"></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-mute);margin-top:4px;display:flex;justify-content:space-between"><span>std ต่ำ = ปลอดภัย</span><span>เส้น = threshold 25</span></div>
+          <div id="safe-status" style="margin-top:16px;font-size:14px;font-weight:600"></div>
+        </div>
+      </div>
+
+      <div class="viz-caption" id="inp-cap"></div>
+    </div>
+
+    <h2>เลือก mask ที่ปลอดภัยที่สุด</h2>
+    <p><code>_pick_safe_polygon_mask</code> หด polygon เข้าทีละ step (ขนาด step ปรับตามเส้นทแยงของฟอง) วัด std ที่ขอบทุกขั้น แล้วเลือกตัว std ต่ำสุด ถ้า std ต่ำสุดยังเกิน <code>max_std=25</code> → คืน <code>None</code> (skip ฟองนี้ ตกไปวิธี box-based แทน):</p>
+
+    <pre><code><span class="tok-key">def</span> <span class="tok-fn">inpaint</span>(self, image, inputs):
+    inputs = self.<span class="tok-fn">parse_inputs</span>(inputs)
+    image, demoted = self.<span class="tok-fn">_safe_fill_polygons</span>(image, inputs)  <span class="tok-com"># ฟองที่ปลอดภัย → ทาขาว</span>
+    <span class="tok-key">if not</span> demoted:
+        <span class="tok-key">return</span> image
+    mask = self.<span class="tok-fn">_masking</span>(image, demoted)                  <span class="tok-com"># ที่เหลือ → box-based</span>
+    <span class="tok-key">return</span> self.<span class="tok-fn">_inpaint</span>(image, mask, inputs=demoted)</code></pre>
+
+    <h2>สองเส้นทาง: safe-fill ก่อน, box-based เป็น fallback</h2>
+    <div class="grid cols-2">
+      <div class="card tinted" style="border-left-color:var(--c-render)">
+        <span class="badge ok">เส้นทางหลัก</span>
+        <h3 style="margin-top:10px">Polygon safe-fill</h3>
+        <p style="font-size:14px">ฟองที่หา mask ปลอดภัยได้ (std &lt; 25) → <strong>ทาขาวทับ</strong> ภายในฟองตรง ๆ ได้ผลคมและเร็ว ไม่ต้องเดา texture</p>
+      </div>
+      <div class="card">
+        <span class="badge warn">fallback</span>
+        <h3 style="margin-top:10px">Box-based inpaint</h3>
+        <p style="font-size:14px">ฟองที่ polygon ยังไม่ปลอดภัย (เช่นพื้นหลังมีลาย) ถูก demote ไปทำ mask แบบกล่อง แล้ว inpaint ด้วย <strong>OpenCV telea</strong> หรือ <strong>Simple-LaMa</strong></p>
+      </div>
+    </div>
+
+    <table>
+      <thead><tr><th>Backend</th><th>วิธี</th><th>เหมาะกับ</th></tr></thead>
+      <tbody>
+        <tr><td><code>OpenCVInpainter</code> <span class="badge ok">default</span></td><td>Telea algorithm</td><td>เร็ว เบา ทำงานบน CPU ได้ดี</td></tr>
+        <tr><td><code>SimpleLamaInpainter</code></td><td>LaMa deep model</td><td>พื้นหลังซับซ้อนที่ต้องเดา texture</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout fix">
+      <span class="ci">✅</span>
+      <p>ผลลัพธ์: <strong>ฟองส่วนใหญ่ใช้ safe-fill</strong> (สะอาด คม) และเฉพาะ edge case ที่ตกไป box-based — แก้ปัญหา polygon overshoot โดยไม่เสียคุณภาพกับฟองปกติ</p>
+    </div>
+
+    <div class="pager">
+      <a href="translation.html"><div class="pg-dir">← ก่อนหน้า</div><div class="pg-title">Stage 3 · Translation</div></a>
+      <a class="next" href="rendering.html"><div class="pg-dir">ถัดไป →</div><div class="pg-title">Stage 5 · Rendering</div></a>
+    </div>
+
+  </div>
+  </main>
+</div>
+<script src="assets/js/site.js"></script>
+<script>
+(function(){
+  var slider = document.getElementById('erode-slider');
+  var ring = document.getElementById('erode-ring');
+  var stdVal = document.getElementById('std-val'), erodeVal = document.getElementById('erode-val');
+  var stdBar = document.getElementById('std-bar'), status = document.getElementById('safe-status');
+  var cap = document.getElementById('inp-cap'), txt = document.getElementById('bub-text');
+  // std per erode step: starts high (touching black outline), drops into interior, picks min
+  var stds = [48, 36, 22, 11, 6, 9, 14];
+  var baseRx = 104, baseRy = 80;
+  function update(){
+    var s = +slider.value;
+    var rx = baseRx - s*5, ry = baseRy - s*4.2;
+    ring.setAttribute('rx', rx); ring.setAttribute('ry', ry);
+    var std = stds[s];
+    erodeVal.textContent = s;
+    stdVal.textContent = std;
+    var safe = std < 25;
+    stdVal.style.color = safe ? 'var(--c-render)' : 'var(--c-detect)';
+    ring.setAttribute('stroke', safe ? 'var(--c-render)' : 'var(--c-detect)');
+    var pct = Math.min(100, std/52*100);
+    stdBar.style.width = pct + '%';
+    stdBar.style.background = safe ? 'var(--c-render)' : 'var(--c-detect)';
+    txt.style.opacity = safe ? 0.15 : 1;  // text "erased" once we can safely fill
+    if(safe){
+      status.innerHTML = '<span style="color:var(--c-render)">✓ ปลอดภัย</span> — std &lt; 25 ใช้ mask นี้ทาขาวทับได้เลย';
+      cap.innerHTML = '<strong>ขอบอยู่ในเนื้อขาวของฟองแล้ว</strong> (std='+std+') — ทาขาวทับลบข้อความเดิมได้โดยไม่แตะเส้นขอบดำ';
+    } else {
+      status.innerHTML = '<span style="color:var(--c-detect)">✗ ยังไม่ปลอดภัย</span> — ขอบ mask ยังพาดเส้นดำ (std สูง)';
+      cap.innerHTML = '<strong>std='+std+' &gt; 25</strong> — ถ้าทาขาวตอนนี้จะกินเส้นขอบฟอง ต้องหด polygon เข้าอีก หรือ demote ไป box-based';
+    }
+  }
+  slider.addEventListener('input', update);
+  update();
+})();
+</script>
+</body>
+</html>
