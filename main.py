@@ -45,6 +45,7 @@ class TranslateRequest(BaseModel):
     text_scale: float | None = None  # >1 = bigger text (fills more of the bubble); blank = server default
     upscale: float | None = None     # output upscale factor (1 = off, e.g. 2); blank = server default
     upscaler: str | None = None      # "lanczos" (fast) | "realesrgan" (AI, opt-in)
+    custom_instruction: str | None = None  # extra localization instruction appended to the guidelines
 
 
 @app.post("/translate/")
@@ -61,6 +62,7 @@ async def translate_image(request: TranslateRequest):
         text_scale=request.text_scale,
         upscale=request.upscale,
         upscaler=request.upscaler,
+        custom_instruction=request.custom_instruction,
     )
     # Keep index alignment with the request (None = failed) so the client can
     # map each translated image back to its source image and swap it in place.
@@ -94,6 +96,7 @@ async def translate_image_stream(request: TranslateRequest):
             text_scale=request.text_scale,
             upscale=request.upscale,
             upscaler=request.upscaler,
+            custom_instruction=request.custom_instruction,
         ):
             b64 = convert_img_to_base64(img) if img is not None else None
             yield json.dumps({"index": index, "image": b64}) + "\n"

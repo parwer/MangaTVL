@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stage 5 · Rendering — MangaTVL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+<button class="menu-btn" aria-label="menu">☰</button>
+<div class="layout">
+
+  <aside class="sidebar">
+    <a class="brand" href="index.html">
+      <span class="logo">漫</span>
+      <span><span class="name">MangaTVL</span><br><span class="sub">EN → TH manga translator</span></span>
+    </a>
+    <nav class="nav-group">
+      <h4>เริ่มต้น</h4>
+      <a class="nav-link" href="index.html"><span class="num">◎</span> ภาพรวม &amp; ที่มา</a>
+      <a class="nav-link" href="architecture.html"><span class="num">⌗</span> สถาปัตยกรรม &amp; API</a>
+    </nav>
+    <nav class="nav-group">
+      <h4>Pipeline · 5 สเตจ</h4>
+      <a class="nav-link" data-stage="detect"  href="detection.html"><span class="num">1</span> Detection</a>
+      <a class="nav-link" data-stage="ocr"     href="ocr.html"><span class="num">2</span> OCR</a>
+      <a class="nav-link" data-stage="trans"   href="translation.html"><span class="num">3</span> Translation</a>
+      <a class="nav-link" data-stage="inpaint" href="inpainting.html"><span class="num">4</span> Inpainting</a>
+      <a class="nav-link active" data-stage="render"  href="rendering.html"><span class="num">5</span> Rendering</a>
+    </nav>
+    <nav class="nav-group">
+      <h4>เพิ่มเติม</h4>
+      <a class="nav-link" href="eval.html"><span class="num">📊</span> Evaluation</a>
+      <a class="nav-link" href="roadmap.html"><span class="num">⚑</span> ปัญหา &amp; อนาคต</a>
+    </nav>
+  </aside>
+
+  <main class="main">
+  <div class="content">
+
+    <header class="page-head">
+      <span class="kicker"><span class="dot" style="background:var(--c-render)"></span> Stage 05 · Rendering</span>
+      <h1>วาดคำแปลให้พอดีฟอง — ตัดคำตามภาษา</h1>
+      <p class="lead">หาพื้นที่วาดที่เป็น <strong>สี่เหลี่ยมใหญ่ที่สุดที่อยู่ในรูปฟอง</strong> (Largest Inscribed Rectangle) แล้วปรับขนาดฟอนต์อัตโนมัติให้ข้อความพอดี ไม่ล้นนอกเส้น</p>
+    </header>
+
+    <div class="io-flow">
+      <span class="io-chip">cleaned image + TranslationResult[]</span>
+      <span class="io-arrow">→ render() →</span>
+      <span class="io-chip" style="border-color:var(--c-render)">ภาพผลลัพธ์</span>
+    </div>
+
+    <h2>หัวใจ: Largest Inscribed Rectangle (LIR)</h2>
+    <p>ฟองมักเป็นทรงรี ถ้าวาดข้อความเต็ม bounding box ตัวอักษรจะล้นออกนอกเส้นโค้ง ระบบจึงหา <strong>สี่เหลี่ยมที่ใหญ่ที่สุดที่ยังอยู่ในรูป polygon ทั้งหมด</strong> เป็นกรอบวาด ลองสลับชั้นด้านล่าง:</p>
+
+    <!-- VIZ: LIR -->
+    <div class="viz">
+      <div class="viz-title">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><rect x="7" y="9" width="10" height="6"/></svg>
+        polygon → LIR → fit text
+      </div>
+
+      <svg viewBox="0 0 560 280" width="100%" style="max-height:320px">
+        <rect width="560" height="280" fill="#0e1320" rx="8"/>
+        <g transform="translate(20,10)">
+          <!-- bubble -->
+          <ellipse cx="160" cy="130" rx="150" ry="105" fill="#f4f1ea" stroke="#111" stroke-width="4"/>
+
+          <!-- bbox layer -->
+          <g id="r-bbox">
+            <rect x="14" y="28" width="292" height="204" fill="none" stroke="var(--c-detect)" stroke-width="2" stroke-dasharray="6 4"/>
+            <text x="16" y="22" class="lbl" fill="var(--c-detect)">det.bbox (ใหญ่ไป → ล้น)</text>
+          </g>
+
+          <!-- LIR layer -->
+          <g id="r-lir">
+            <rect x="58" y="78" width="204" height="104" fill="rgba(34,197,94,.14)" stroke="var(--c-render)" stroke-width="2.5"/>
+            <text x="58" y="72" class="lbl" fill="var(--c-render)">LIR (สี่เหลี่ยมในรูปฟอง)</text>
+          </g>
+
+          <!-- text layer -->
+          <g id="r-text">
+            <text x="160" y="112" text-anchor="middle" font-family="Noto Sans Thai" font-size="22" fill="#1a1a1a" font-weight="600">ไม่อยากเชื่อ</text>
+            <text x="160" y="146" text-anchor="middle" font-family="Noto Sans Thai" font-size="22" fill="#1a1a1a" font-weight="600">เลยว่ะ!</text>
+          </g>
+        </g>
+      </svg>
+
+      <div class="viz-controls">
+        <button class="btn toggle active" data-rlayer="bbox" id="rt-bbox">bbox</button>
+        <button class="btn toggle active" data-rlayer="lir"  id="rt-lir">LIR</button>
+        <button class="btn toggle active" data-rlayer="text" id="rt-text">ข้อความ</button>
+      </div>
+      <div class="viz-caption">ลำดับการเลือกพื้นที่วาด (priority): <strong>polygon LIR</strong> → <code>det.bbox</code> inset → OCR-union fallback — LIR ทำให้ข้อความอยู่ในเส้นฟองเสมอ</div>
+    </div>
+
+    <h3>หา LIR ยังไง</h3>
+    <p><code>inscribed_rect</code> (ใน <code>utils/common.py</code>) แปลง polygon เป็น raster แล้ว erode → หาสี่เหลี่ยมใหญ่สุดด้วยอัลกอริทึม "largest rectangle in histogram" ความเร็ว O(H×W):</p>
+    <pre><code>rasterize(polygon) → erode → largest_rectangle_in_histogram(mask)  <span class="tok-com"># O(H×W)</span></code></pre>
+
+    <h2>ปรับขนาดฟอนต์ + กันล้น</h2>
+    <ul>
+      <li><strong>auto font-size</strong> — binary search หาขนาดฟอนต์ที่ใหญ่สุดที่ยังพอดี LIR</li>
+      <li><strong>stroke scaling</strong> — ความหนาเส้นขอบตัวอักษรปรับตามฟอนต์ (<code>max(1, fs//12)</code>) และนับ stroke เข้าใน fit check ด้วย</li>
+      <li><strong>fallback ไม่ล้น</strong> — ถ้าย่อจนต่ำกว่า min font แล้วยังไม่พอ → truncate + ใส่ "…"</li>
+    </ul>
+
+    <h2>ตัดบรรทัดตามภาษาปลายทาง</h2>
+    <p>การขึ้นบรรทัดถูกขับด้วย field <code>wrap</code> ใน <code>languages.json</code> เลือก 3 โหมดตาม <code>to_lang</code>:</p>
+    <table>
+      <thead><tr><th>โหมด</th><th>ภาษา</th><th>วิธีตัด</th></tr></thead>
+      <tbody>
+        <tr><td><code>pythainlp</code></td><td>ไทย</td><td>ตัดคำด้วย newmm ไม่ตัดกลางคำ (import แบบ lazy)</td></tr>
+        <tr><td><code>char</code></td><td>ญี่ปุ่น / จีน</td><td>ตัดได้ทุกตัวอักษร (CJK ขึ้นบรรทัดแบบนี้อยู่แล้ว)</td></tr>
+        <tr><td><code>space</code></td><td>อังกฤษ / เกาหลี / default</td><td>ตัดที่ช่องว่าง คำอยู่ครบ</td></tr>
+      </tbody>
+    </table>
+
+    <h2>คุณภาพการแสดงผล: ใหญ่ขึ้น + คมขึ้น + ขยายได้</h2>
+    <div class="grid cols-3">
+      <div class="card">
+        <h3 class="mt0" style="color:var(--c-render)">text_scale</h3>
+        <p style="font-size:13.5px;margin:0">LIR ของฟองรีมักเล็กเกินไป → <code>text_scale</code> (default 1.2) ขยายพื้นที่ฟิตจาก LIR ออกไปหา bbox ตามสัดส่วน (cap ที่ขอบฟอง) ให้ข้อความเต็มฟองขึ้น</p>
+      </div>
+      <div class="card">
+        <h3 class="mt0" style="color:var(--c-render)">supersample</h3>
+        <p style="font-size:13.5px;margin:0">วาดข้อความบน overlay ที่ scale 2× แล้ว downscale LANCZOS → ขอบ glyph คมขึ้นที่ขนาดเดิม โดยไม่แตะอาร์ตเวิร์ก</p>
+      </div>
+      <div class="card">
+        <h3 class="mt0" style="color:var(--c-render)">upscale</h3>
+        <p style="font-size:13.5px;margin:0">ขยายภาพ final ได้ (1–4×): <code>lanczos</code> (เร็ว) หรือ <code>realesrgan</code> (AI deblur อาร์ตเวิร์ก, fallback เป็น lanczos ถ้าไม่พร้อม)</p>
+      </div>
+    </div>
+
+    <h2>ฟอนต์</h2>
+    <p>มีฟอนต์มังงะ/คอมิกหลายแบบ (OFL/Apache) ครอบ 4 สคริปต์ เลือกได้ต่อ request ผ่าน <code>font</code> key — ถ้าไม่ระบุจะใช้ default ตาม <code>to_lang</code> เพื่อให้ CJK/เกาหลีได้ glyph ที่ถูก ไม่เป็นกล่อง tofu:</p>
+    <div class="pill-row">
+      <span class="pill">ไทย: TH Sarabun · Itim · Mali · Sriracha · Charm</span>
+      <span class="pill">Latin: Bangers · Comic Neue · Permanent Marker · Patrick Hand</span>
+      <span class="pill">ญี่ปุ่น: Yusei Magic</span>
+      <span class="pill">จีน: Zhi Mang Xing</span>
+      <span class="pill">เกาหลี: Nanum Pen</span>
+    </div>
+    <p class="muted">รายการฟอนต์อยู่ที่ <code>GET /fonts/</code> — เพิ่มฟอนต์ใหม่แค่วาง <code>.ttf</code> + เพิ่ม entry ใน <code>fonts.json</code></p>
+
+    <div class="pager">
+      <a href="inpainting.html"><div class="pg-dir">← ก่อนหน้า</div><div class="pg-title">Stage 4 · Inpainting</div></a>
+      <a class="next" href="architecture.html"><div class="pg-dir">ถัดไป →</div><div class="pg-title">สถาปัตยกรรม &amp; API</div></a>
+    </div>
+
+  </div>
+  </main>
+</div>
+<script src="assets/js/site.js"></script>
+<script>
+(function(){
+  var map = { bbox: document.getElementById('r-bbox'), lir: document.getElementById('r-lir'), text: document.getElementById('r-text') };
+  ['bbox','lir','text'].forEach(function(k){
+    var b = document.getElementById('rt-'+k);
+    b.onclick = function(){
+      var on = b.classList.toggle('active');
+      map[k].style.display = on ? '' : 'none';
+    };
+  });
+})();
+</script>
+</body>
+</html>

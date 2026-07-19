@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stage 1 · Detection — MangaTVL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+<button class="menu-btn" aria-label="menu">☰</button>
+<div class="layout">
+
+  <aside class="sidebar">
+    <a class="brand" href="index.html">
+      <span class="logo">漫</span>
+      <span><span class="name">MangaTVL</span><br><span class="sub">EN → TH manga translator</span></span>
+    </a>
+    <nav class="nav-group">
+      <h4>เริ่มต้น</h4>
+      <a class="nav-link" href="index.html"><span class="num">◎</span> ภาพรวม &amp; ที่มา</a>
+      <a class="nav-link" href="architecture.html"><span class="num">⌗</span> สถาปัตยกรรม &amp; API</a>
+    </nav>
+    <nav class="nav-group">
+      <h4>Pipeline · 5 สเตจ</h4>
+      <a class="nav-link active" data-stage="detect"  href="detection.html"><span class="num">1</span> Detection</a>
+      <a class="nav-link" data-stage="ocr"     href="ocr.html"><span class="num">2</span> OCR</a>
+      <a class="nav-link" data-stage="trans"   href="translation.html"><span class="num">3</span> Translation</a>
+      <a class="nav-link" data-stage="inpaint" href="inpainting.html"><span class="num">4</span> Inpainting</a>
+      <a class="nav-link" data-stage="render"  href="rendering.html"><span class="num">5</span> Rendering</a>
+    </nav>
+    <nav class="nav-group">
+      <h4>เพิ่มเติม</h4>
+      <a class="nav-link" href="eval.html"><span class="num">📊</span> Evaluation</a>
+      <a class="nav-link" href="roadmap.html"><span class="num">⚑</span> ปัญหา &amp; อนาคต</a>
+    </nav>
+  </aside>
+
+  <main class="main">
+  <div class="content">
+
+    <header class="page-head">
+      <span class="kicker"><span class="dot" style="background:var(--c-detect)"></span> Stage 01 · Detection</span>
+      <h1>ตรวจจับฟองคำพูด เป็น <em>polygon</em> ไม่ใช่แค่กรอบ</h1>
+      <p class="lead">สเตจแรกใช้ YOLO segmentation หาตำแหน่งฟองคำพูดในหน้ามังงะ และคืน <strong>รูปทรง polygon</strong> ของแต่ละฟอง — ข้อมูลที่จะถูกพาไปใช้ในทุกสเตจถัดไป</p>
+    </header>
+
+    <div class="io-flow">
+      <span class="io-chip">PIL.Image (หน้ามังงะ)</span>
+      <span class="io-arrow">→ YoloDetection.detect() →</span>
+      <span class="io-chip" style="border-color:var(--c-detect)">DetectionResult[ ]</span>
+    </div>
+
+    <h2>แนวคิด: ทำไม polygon ดีกว่า box</h2>
+    <p>ฟองคำพูดมักวางใกล้กัน ถ้าตรวจจับเป็น <strong>กรอบสี่เหลี่ยม</strong> ล้วน กรอบของฟองหนึ่งจะกินพื้นที่ (และข้อความ) ของฟองข้าง ๆ ทันทีที่ฟองไม่ได้เป็นทรงสี่เหลี่ยม ลองสลับมุมมองด้านล่างเพื่อเห็นความต่าง:</p>
+
+    <!-- VIZ: bbox vs polygon -->
+    <div class="viz">
+      <div class="viz-title">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+        Box vs Polygon · ฟองสองใบที่อยู่ใกล้กัน
+      </div>
+
+      <svg viewBox="0 0 560 300" width="100%" style="max-height:340px">
+        <!-- page bg -->
+        <rect x="0" y="0" width="560" height="300" fill="#11151f" rx="8"/>
+        <!-- decorative panel art -->
+        <g opacity="0.5" stroke="#2a3344" stroke-width="2" fill="none">
+          <path d="M20 270 q40 -30 90 -10 t100 5"/>
+          <path d="M360 280 q50 -40 110 -15"/>
+        </g>
+
+        <!-- Bubble A (oval, upper-left)  ellipse cx190 cy105 rx125 ry68 -->
+        <g id="bubbleA">
+          <ellipse cx="190" cy="105" rx="125" ry="68" fill="#f4f1ea" stroke="#1a1a1a" stroke-width="3"/>
+          <path d="M225 168 L245 200 L262 162 Z" fill="#f4f1ea" stroke="#1a1a1a" stroke-width="3"/>
+          <text x="190" y="98" text-anchor="middle" font-family="JetBrains Mono" font-size="15" fill="#222" font-weight="700">I CAN'T</text>
+          <text x="190" y="122" text-anchor="middle" font-family="JetBrains Mono" font-size="15" fill="#222" font-weight="700">BELIEVE IT!</text>
+        </g>
+
+        <!-- Bubble B (oval, lower-right)  ellipse cx395 cy190 rx115 ry62 -->
+        <g id="bubbleB">
+          <ellipse cx="395" cy="190" rx="115" ry="62" fill="#f4f1ea" stroke="#1a1a1a" stroke-width="3"/>
+          <path d="M352 132 L320 102 L372 138 Z" fill="#f4f1ea" stroke="#1a1a1a" stroke-width="3"/>
+          <text x="395" y="184" text-anchor="middle" font-family="JetBrains Mono" font-size="15" fill="#222" font-weight="700">ME NEITHER</text>
+          <text x="395" y="208" text-anchor="middle" font-family="JetBrains Mono" font-size="15" fill="#222" font-weight="700">PAL...</text>
+        </g>
+
+        <!-- BBOX overlay : rects = exact bounding boxes of the ellipses (incl. tail) -->
+        <g id="layer-bbox" style="display:none">
+          <!-- overlap highlight drawn first (under the outlines) -->
+          <rect id="bbox-overlap" x="280" y="102" width="0" height="98" fill="rgba(239,68,68,.30)"/>
+          <!-- bbox A: x65 y37 .. x315 y200 -->
+          <rect x="65" y="37" width="250" height="163" fill="none" stroke="var(--c-detect)" stroke-width="2.5" stroke-dasharray="6 4"/>
+          <!-- bbox B: x280 y102 .. x510 y252 -->
+          <rect x="280" y="102" width="230" height="150" fill="none" stroke="var(--c-detect)" stroke-width="2.5" stroke-dasharray="6 4"/>
+          <text x="69" y="31" class="lbl" fill="var(--c-detect)">bbox A</text>
+          <text x="470" y="266" class="lbl" fill="var(--c-detect)">bbox B</text>
+        </g>
+
+        <!-- POLYGON overlay : SAME ellipse params as the bubbles → traces them exactly -->
+        <g id="layer-poly" style="display:none">
+          <ellipse cx="190" cy="105" rx="125" ry="68" fill="rgba(34,197,94,.12)" stroke="var(--c-render)" stroke-width="2.5" stroke-dasharray="5 3"/>
+          <path d="M225 168 L245 200 L262 162 Z" fill="rgba(34,197,94,.12)" stroke="var(--c-render)" stroke-width="2.5" stroke-dasharray="5 3"/>
+          <ellipse cx="395" cy="190" rx="115" ry="62" fill="rgba(34,197,94,.12)" stroke="var(--c-render)" stroke-width="2.5" stroke-dasharray="5 3"/>
+          <path d="M352 132 L320 102 L372 138 Z" fill="rgba(34,197,94,.12)" stroke="var(--c-render)" stroke-width="2.5" stroke-dasharray="5 3"/>
+          <text x="100" y="31" class="lbl" fill="var(--c-render)">segmentation A</text>
+          <text x="430" y="266" class="lbl" fill="var(--c-render)">segmentation B</text>
+        </g>
+      </svg>
+
+      <div class="viz-controls">
+        <button class="btn toggle" data-layer="bbox" id="t-bbox">แสดง bounding box</button>
+        <button class="btn toggle" data-layer="poly" id="t-poly">แสดง polygon</button>
+        <button class="btn" id="t-clear">ซ่อนทั้งหมด</button>
+      </div>
+      <div class="viz-caption" id="det-cap"><strong>กดปุ่มด้านบน</strong> — สังเกตว่ากรอบสี่เหลี่ยมของฟอง B (สีแดง) ทับเข้าไปในฟอง A ส่วน polygon (สีเขียว) แนบรูปฟองจริง จึงไม่กินกัน</div>
+    </div>
+
+    <h2>Backend: <code>YoloDetection</code></h2>
+    <p>backend หลัก/default ปัจจุบัน ใช้ <code>ultralytics.YOLO</code> รองรับทั้งไฟล์ <code>.pt</code> และ <code>.onnx</code> และทำงานได้ทั้ง task <code>detect</code> และ <code>segment</code>:</p>
+    <pre><code>result = self.<span class="tok-fn">model</span>(image, conf=self.conf, iou=self.iou, device=self.device)[<span class="tok-num">0</span>]
+boxes    = result.boxes.xyxy.cpu().numpy()        <span class="tok-com"># [x1,y1,x2,y2]</span>
+cls_ids  = result.boxes.cls.cpu().numpy()
+polygons = result.masks.xy <span class="tok-key">if</span> result.masks <span class="tok-key">is not None else None</span>  <span class="tok-com"># polygon!</span>
+<span class="tok-key">return</span> self.<span class="tok-fn">build_results</span>(boxes, cls_ids, polygons)</code></pre>
+
+    <div class="callout note">
+      <span class="ci">⚠️</span>
+      <p>โมเดลต้องเป็นรุ่น <strong>-seg</strong> (เช่น <code>yolo26n-seg.pt</code>) เท่านั้น ถ้าใช้รุ่น detect-only โมเดลจะไม่มี seg head ทำให้ <code>result.masks</code> เป็น <code>None</code> และไม่ได้ polygon — ทุกประโยชน์ของ v2 จะหายไป</p>
+    </div>
+
+    <h3>NMS — กันกล่องซ้อนซ้ำ</h3>
+    <p><code>DetectorBase</code> กำหนด contract <code>.detect(image) → list[DetectionResult]</code> ร่วมของทุก backend พร้อม helper <code>build_results</code> ที่แปลง output แบบ ultralytics (xyxy + class ids + polygons จาก <code>result.masks.xy</code>) เป็น schema และตัดกล่องที่ซ้อนทับกันมากด้วย Non-Max Suppression ตาม IoU</p>
+
+    <!-- Model & dataset -->
+    <h2>โมเดล &amp; Dataset</h2>
+    <div class="grid cols-2">
+      <div class="card">
+        <h3 class="mt0">Base model</h3>
+        <ul style="margin-bottom:0">
+          <li><code>yolo26n-seg.pt</code> (ต้องเป็น <strong>-seg</strong>)</li>
+          <li>default weight: <code>assets/models/best_diplom.pt</code> (resolve แบบ package-relative)</li>
+          <li>weight (<code>*.pt</code>/<code>*.onnx</code>) ถูก gitignore — ต้องจัดหาแยก</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3 class="mt0">Dataset (Roboflow)</h3>
+        <ul style="margin-bottom:0">
+          <li><strong>diplom-uhct7/manga-6puie v4</strong></li>
+          <li><code>nc: 1</code>, <code>names: ['bubble']</code> — class เดียว</li>
+          <li>train 1,304 / valid 189 / test 103 ภาพ (polygon labels)</li>
+          <li>มี negative samples (~15%) ช่วยลด false positive</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout problem">
+      <span class="ci">🔴</span>
+      <p><strong>ข้อจำกัดที่รู้:</strong> dataset มี class เดียว (bubble) → detect ฟองคำพูดแม่น แต่ <strong>ไม่รู้จัก SFX / ตัวอักษรวาดมือ / free_text</strong> ดูแนวทางแก้ใน <a href="roadmap.html">ปัญหา &amp; อนาคต</a></p>
+    </div>
+
+    <h3>Output schema</h3>
+    <pre><code><span class="tok-key">class</span> <span class="tok-fn">DetectionResult</span>(BaseModel):
+    bbox: list[int]                              <span class="tok-com"># [x1, y1, x2, y2]</span>
+    segmentation: list[list[int]] | <span class="tok-key">None</span> = <span class="tok-key">None</span>  <span class="tok-com"># polygon [[x,y], ...]</span>
+    form_type: str                               <span class="tok-com"># "bubble" / "free_text"</span></code></pre>
+    <p class="muted">หมายเหตุ: <code>ONNXDetection</code> (box-only) ยังอยู่ในโค้ดเป็น legacy option แต่ <strong>เลิกใช้เป็น default แล้ว</strong></p>
+
+    <div class="pager">
+      <a href="index.html"><div class="pg-dir">← ก่อนหน้า</div><div class="pg-title">ภาพรวม &amp; ที่มา</div></a>
+      <a class="next" href="ocr.html"><div class="pg-dir">ถัดไป →</div><div class="pg-title">Stage 2 · OCR</div></a>
+    </div>
+
+  </div>
+  </main>
+</div>
+<script src="assets/js/site.js"></script>
+<script>
+(function(){
+  var layers = { bbox: document.getElementById('layer-bbox'), poly: document.getElementById('layer-poly') };
+  var btns = { bbox: document.getElementById('t-bbox'), poly: document.getElementById('t-poly') };
+  var overlap = document.getElementById('bbox-overlap');
+  var cap = document.getElementById('det-cap');
+  var state = { bbox:false, poly:false };
+  function caption(){
+    if(state.bbox && state.poly) cap.innerHTML = '<strong>เทียบกัน:</strong> ฟองทั้งสองอยู่ห่างกันจริง ๆ (เส้นเขียว polygon ไม่แตะกัน) แต่ <em>กรอบสี่เหลี่ยม</em> ของมันกลับเหลื่อมกันเป็นพื้นที่สีแดง — นั่นคือเหตุผลที่ OCR/inpaint/render ใช้ polygon ไม่ใช่ bbox';
+    else if(state.bbox) cap.innerHTML = '<strong>Bounding box:</strong> แถบสีแดงคือส่วนที่กรอบ A กับ B <em>เหลื่อมกัน</em> — เนื้อ + เส้นขอบของฟอง A โผล่เข้ามาในกรอบ B ดังนั้นตอน crop ฟอง B ตามกรอบ จะติด noise ของฟอง A มาด้วย';
+    else if(state.poly) cap.innerHTML = '<strong>Polygon (segmentation):</strong> เส้นเขียวใช้พิกัดเดียวกับรูปฟอง จึง <em>แนบขอบฟองจริงเป๊ะ</em> และฟองสองใบไม่แตะกันเลย → crop ตาม polygon ได้เฉพาะข้อความในฟองนั้น';
+    else cap.innerHTML = '<strong>กดปุ่มด้านบน</strong> เพื่อสลับ bbox / polygon — สังเกตว่ากรอบสี่เหลี่ยม (แดง) เหลื่อมกัน แต่ polygon (เขียว) ที่แนบรูปฟองจริงไม่แตะกัน';
+  }
+  function refresh(){
+    layers.bbox.style.display = state.bbox ? '' : 'none';
+    layers.poly.style.display = state.poly ? '' : 'none';
+    btns.bbox.classList.toggle('active', state.bbox);
+    btns.poly.classList.toggle('active', state.poly);
+    if(overlap){ overlap.setAttribute('width', state.bbox ? '35' : '0'); }
+    caption();
+  }
+  btns.bbox.onclick = function(){ state.bbox = !state.bbox; refresh(); };
+  btns.poly.onclick = function(){ state.poly = !state.poly; refresh(); };
+  document.getElementById('t-clear').onclick = function(){ state.bbox=false; state.poly=false; refresh(); };
+  refresh();
+})();
+</script>
+</body>
+</html>

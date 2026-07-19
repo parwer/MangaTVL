@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MangaTVL — แปลมังงะ EN→TH ด้วย CV + LLM Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+<button class="menu-btn" aria-label="menu">☰</button>
+<div class="layout">
+
+  <aside class="sidebar">
+    <a class="brand" href="index.html">
+      <span class="logo">漫</span>
+      <span><span class="name">MangaTVL</span><br><span class="sub">EN → TH manga translator</span></span>
+    </a>
+    <nav class="nav-group">
+      <h4>เริ่มต้น</h4>
+      <a class="nav-link active" href="index.html"><span class="num">◎</span> ภาพรวม &amp; ที่มา</a>
+      <a class="nav-link" href="architecture.html"><span class="num">⌗</span> สถาปัตยกรรม &amp; API</a>
+    </nav>
+    <nav class="nav-group">
+      <h4>Pipeline · 5 สเตจ</h4>
+      <a class="nav-link" data-stage="detect"  href="detection.html"><span class="num">1</span> Detection</a>
+      <a class="nav-link" data-stage="ocr"     href="ocr.html"><span class="num">2</span> OCR</a>
+      <a class="nav-link" data-stage="trans"   href="translation.html"><span class="num">3</span> Translation</a>
+      <a class="nav-link" data-stage="inpaint" href="inpainting.html"><span class="num">4</span> Inpainting</a>
+      <a class="nav-link" data-stage="render"  href="rendering.html"><span class="num">5</span> Rendering</a>
+    </nav>
+    <nav class="nav-group">
+      <h4>เพิ่มเติม</h4>
+      <a class="nav-link" href="eval.html"><span class="num">📊</span> Evaluation</a>
+      <a class="nav-link" href="roadmap.html"><span class="num">⚑</span> ปัญหา &amp; อนาคต</a>
+    </nav>
+  </aside>
+
+  <main class="main">
+  <div class="content">
+
+    <header class="hero">
+      <span class="kicker"><span class="dot" style="background:var(--c-trans)"></span> Computer Vision × LLM</span>
+      <h1>แปลหน้ามังงะทั้งหน้า<br>จากอังกฤษเป็นไทย แบบอัตโนมัติ</h1>
+      <p class="lead">MangaTVL เป็นบริการ FastAPI ที่รับภาพหน้ามังงะ/คอมมิค แล้ว <strong>ตรวจจับฟองคำพูด → อ่านข้อความ → แปลด้วย LLM → ลบข้อความเดิม → วาดคำแปลกลับลงภาพ</strong> ผ่าน pipeline 5 สเตจที่สลับเปลี่ยนชิ้นส่วนได้ทั้งหมด</p>
+      <div class="hero-tags">
+        <span class="pill">🎯 YOLO-seg detection</span>
+        <span class="pill">🔤 EasyOCR / manga-ocr</span>
+        <span class="pill">🌐 OpenRouter · Gemini · Groq</span>
+        <span class="pill">🩹 Polygon-aware inpaint</span>
+        <span class="pill">✍️ Pillow + pythainlp</span>
+        <span class="pill">⚡ FastAPI streaming</span>
+      </div>
+    </header>
+
+    <!-- real before/after from the eval set -->
+    <div class="img-compare" data-compare style="max-width:520px;margin:6px auto 8px">
+      <img class="ic-base" src="assets/eval/page009/rendered_image.png" alt="ผลลัพธ์ภาษาไทย">
+      <div class="ic-top"><img src="assets/eval/page009/original.png" alt="ต้นฉบับภาษาอังกฤษ"></div>
+      <div class="ic-handle"></div>
+      <span class="ic-label left">EN · ต้นฉบับ</span>
+      <span class="ic-label right">TH · แปลแล้ว</span>
+    </div>
+    <p class="viz-caption" style="text-align:center;max-width:520px;margin:0 auto 8px"><strong>ผลจริงจากชุดทดสอบ</strong> (Grand Blue ch.29) — ลากแถบกลางภาพเพื่อเทียบต้นฉบับกับผลแปล · ดูการวัดผลเต็มที่ <a href="eval.html">📊 Evaluation</a></p>
+
+    <!-- ที่มาที่ไป -->
+    <span class="section-tag">ที่มาที่ไป</span>
+    <h2 class="mt0">ทำไมต้องมีโปรเจกต์นี้</h2>
+    <p>มังงะ/คอมมิคจำนวนมากมีเฉพาะต้นฉบับภาษาอังกฤษ การแปลด้วยมือต้องทำซ้ำ ๆ หลายขั้น — กวาดหาฟองคำพูด, พิมพ์ข้อความ, แปล, ลบของเดิม, แล้ววาดตัวอักษรใหม่ให้พอดีฟอง MangaTVL ยุบงานทั้งหมดนี้ให้เป็นท่อประมวลผลเดียวที่รับ "ภาพเข้า → ภาพแปลออก" และเปิดเป็น API ให้ client (เช่น userscript บนหน้าเว็บอ่านมังงะ) เรียกใช้แบบ batch ได้ — คุณภาพของแต่ละสเตจถูก<strong>วัดผลจริง</strong>บนหน้ามังงะ (ดู <a href="eval.html">📊 Evaluation</a>)</p>
+
+    <div class="grid cols-2">
+      <div class="card">
+        <span class="badge info">v1 — จุดเริ่ม</span>
+        <h3 style="margin-top:10px">ONNX box-only detection</h3>
+        <p style="font-size:14px">รุ่นแรกตรวจจับฟองเป็น <strong>กรอบสี่เหลี่ยม</strong> ล้วน ทำให้ตอน crop ไป OCR กรอบมักกินข้อความของฟองข้าง ๆ → OCR ปนข้ามฟอง, คำแปลลงผิดฟอง, และ inpaint ลบเลยขอบ</p>
+      </div>
+      <div class="card tinted" style="border-left-color:var(--c-render)">
+        <span class="badge ok">v2 — ปัจจุบัน</span>
+        <h3 style="margin-top:10px">YOLO-seg + polygon ทุกสเตจ</h3>
+        <p style="font-size:14px">ย้ายมาใช้ <strong>YOLO segmentation</strong> ที่ให้ <strong>polygon</strong> ของฟองจริง แล้วพา polygon นั้นไหลผ่านทุกสเตจ — ใช้ clean OCR, safe-fill inpaint, และหาพื้นที่วาด (LIR) ตามรูปฟองจริง คือหัวใจที่แก้ปัญหาตั้งต้นของ v1</p>
+      </div>
+    </div>
+
+    <div class="callout note">
+      <span class="ci">💡</span>
+      <p><strong>แนวคิดหลัก:</strong> "รูปทรงของฟอง" (polygon) คือข้อมูลที่มีค่าที่สุด ถ้ารู้ขอบเขตฟองแม่น ๆ ตั้งแต่สเตจแรก ทุกสเตจถัดไปก็ทำงานสะอาดขึ้นทันที — นี่คือเหตุผลที่ทั้งระบบถูกออกแบบรอบ ๆ polygon</p>
+    </div>
+
+    <!-- Pipeline visualization -->
+    <span class="section-tag">ภาพรวม Pipeline</span>
+    <h2 class="mt0">เส้นทางของหนึ่งภาพ ผ่าน 5 สเตจ</h2>
+    <p>แต่ละสเตจเป็น subpackage ของตัวเอง มี abstract base + หลาย backend ที่สลับได้ ตัว orchestrator คือคลาส <code>Pipeline</code> ใน <code>pipeline.py</code> (root) ส่วน <code>main.py</code> เปิดเป็น FastAPI service</p>
+
+    <div class="viz">
+      <div class="viz-title">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        Pipeline flow · กดที่สเตจเพื่อไปดูรายละเอียด
+      </div>
+
+      <div class="flow">
+        <a class="flow-node" href="detection.html" style="text-decoration:none;color:inherit">
+          <span class="fn-num" style="background:var(--c-detect)">1</span>
+          <div><h4>Detection</h4><p>ตรวจจับฟอง + polygon ของแต่ละฟอง</p></div>
+          <div class="fn-tech">YoloDetection<br>(ultralytics seg)</div>
+        </a>
+        <div class="flow-pipe"></div>
+        <div class="io-flow" style="margin:4px 0 4px 30px"><span class="io-chip">DetectionResult[]</span><span class="io-arrow">— bbox + segmentation polygon</span></div>
+        <div class="flow-pipe"></div>
+
+        <a class="flow-node" href="ocr.html" style="text-decoration:none;color:inherit">
+          <span class="fn-num" style="background:var(--c-ocr)">2</span>
+          <div><h4>OCR</h4><p>crop ต่อฟอง → ทาขาวนอก polygon → อ่านข้อความ</p></div>
+          <div class="fn-tech">EasyOCR (default)<br>manga-ocr (ญี่ปุ่น)</div>
+        </a>
+        <div class="flow-pipe"></div>
+        <div class="io-flow" style="margin:4px 0 4px 30px"><span class="io-chip">OCRResult[]</span><span class="io-arrow">— text + boxes (พา DetectionResult ไปด้วย)</span></div>
+        <div class="flow-pipe"></div>
+
+        <a class="flow-node" href="translation.html" style="text-decoration:none;color:inherit">
+          <span class="fn-num" style="background:var(--c-trans)">3</span>
+          <div><h4>Translation</h4><p>ส่งข้อความทั้งหน้าให้ LLM แปลทีเดียว map กลับด้วย text_no</p></div>
+          <div class="fn-tech">OpenRouter / Gemini<br>/ Groq (async)</div>
+        </a>
+        <div class="flow-pipe"></div>
+        <div class="io-flow" style="margin:4px 0 4px 30px"><span class="io-chip">TranslationResult[]</span><span class="io-arrow">— translated_text ต่อฟอง</span></div>
+        <div class="flow-pipe"></div>
+
+        <a class="flow-node" href="inpainting.html" style="text-decoration:none;color:inherit">
+          <span class="fn-num" style="background:var(--c-inpaint)">4</span>
+          <div><h4>Inpainting</h4><p>ลบข้อความเดิม (polygon safe-fill → box fallback)</p></div>
+          <div class="fn-tech">OpenCV telea<br>/ Simple-LaMa</div>
+        </a>
+        <div class="flow-pipe"></div>
+        <div class="io-flow" style="margin:4px 0 4px 30px"><span class="io-chip">cleaned image</span></div>
+        <div class="flow-pipe"></div>
+
+        <a class="flow-node" href="rendering.html" style="text-decoration:none;color:inherit">
+          <span class="fn-num" style="background:var(--c-render)">5</span>
+          <div><h4>Rendering</h4><p>วาดคำแปลในพื้นที่ฟอง (LIR) ตัดคำตามภาษา</p></div>
+          <div class="fn-tech">Pillow + pythainlp<br>auto font-size</div>
+        </a>
+      </div>
+
+      <div class="viz-caption">ทุกสเตจสื่อสารผ่าน Pydantic models — <code>DetectionResult</code> → <code>OCRResult</code> → <code>TranslationResult</code> โดย <strong>DetectionResult (พร้อม polygon) ถูกฝังต่อเนื่องไปจนสเตจสุดท้าย</strong></div>
+    </div>
+
+    <!-- orchestrator code -->
+    <h3>หัวใจ orchestrator</h3>
+    <p>ทั้ง pipeline ถูกร้อยใน <code>_run_on_image</code> ตัวเดียว — อ่านง่ายและเห็นลำดับชัด:</p>
+    <pre><code><span class="tok-key">async def</span> <span class="tok-fn">_run_on_image</span>(self, image, process_image=<span class="tok-key">False</span>):
+    detection_result = self.det_model.<span class="tok-fn">detect</span>(image)        <span class="tok-com"># [1] ฟอง + polygon</span>
+    <span class="tok-key">if not</span> detection_result:
+        <span class="tok-key">return</span> image                                  <span class="tok-com"># ไม่มีอะไรให้แปล</span>
+    ocr_result = self.<span class="tok-fn">_get_ocr</span>(from_lang).<span class="tok-fn">get_ocr</span>(image, detection_result)  <span class="tok-com"># [2]</span>
+    context_image = self.<span class="tok-fn">resize_image</span>(image) <span class="tok-key">if</span> process_image <span class="tok-key">else None</span>
+    translation_result = <span class="tok-key">await</span> translator.<span class="tok-fn">translate</span>(ocr_result, image=context_image) <span class="tok-com"># [3]</span>
+    inpainted_image = self.inpainter.<span class="tok-fn">inpaint</span>(image, translation_result)        <span class="tok-com"># [4]</span>
+    <span class="tok-key">return</span> self.renderer.<span class="tok-fn">render</span>(inpainted_image, translation_result)         <span class="tok-com"># [5]</span></code></pre>
+
+    <!-- tech stack -->
+    <span class="section-tag">สแต็กเทคโนโลยี</span>
+    <h2 class="mt0">ใครทำอะไร</h2>
+    <table>
+      <thead><tr><th>สเตจ</th><th>เทคโนโลยี</th><th>ไฟล์หลัก</th></tr></thead>
+      <tbody>
+        <tr><td><span class="badge" style="background:rgba(239,68,68,.15);color:#f87171">1 Detection</span></td><td>ultralytics YOLO-seg (default)</td><td><code>detection/yolo_detection.py</code></td></tr>
+        <tr><td><span class="badge" style="background:rgba(245,158,11,.15);color:#fbbf24">2 OCR</span></td><td>EasyOCR · manga-ocr · PaddleOCR</td><td><code>ocr/easyocr_engine.py</code></td></tr>
+        <tr><td><span class="badge info">3 Translation</span></td><td>OpenRouter / Gemini / Groq (async)</td><td><code>translators/</code></td></tr>
+        <tr><td><span class="badge" style="background:rgba(168,85,247,.15);color:#c084fc">4 Inpainting</span></td><td>OpenCV telea / Simple-LaMa</td><td><code>inpainting/inpainter.py</code></td></tr>
+        <tr><td><span class="badge ok">5 Rendering</span></td><td>Pillow + pythainlp</td><td><code>rendering/renderer.py</code></td></tr>
+        <tr><td><span class="badge" style="background:rgba(20,184,166,.15);color:#2dd4bf">Serving</span></td><td>FastAPI (REST + NDJSON stream)</td><td><code>main.py</code></td></tr>
+      </tbody>
+    </table>
+
+    <!-- stage cards -->
+    <h2>เจาะลึกแต่ละสเตจ</h2>
+    <div class="grid cols-2">
+      <a class="stage-card" href="detection.html"><span class="bar" style="background:var(--c-detect)"></span><span class="scard-num" style="color:var(--c-detect)">STAGE 01</span><h3>Detection</h3><p>YOLO segmentation หาฟองเป็น polygon — รวมถึง dataset, NMS และความต่างจาก box-only</p></a>
+      <a class="stage-card" href="ocr.html"><span class="bar" style="background:var(--c-ocr)"></span><span class="scard-num" style="color:var(--c-ocr)">STAGE 02</span><h3>OCR</h3><p>crop ต่อฟอง + clean_poly ทาขาวนอก polygon เพื่อกัน OCR ข้ามฟอง</p></a>
+      <a class="stage-card" href="translation.html"><span class="bar" style="background:var(--c-trans)"></span><span class="scard-num" style="color:var(--c-trans)">STAGE 03</span><h3>Translation</h3><p>แปลทั้งหน้าทีเดียวเป็น JSON, map ด้วย text_no, ส่งรูปเป็น multimodal part</p></a>
+      <a class="stage-card" href="inpainting.html"><span class="bar" style="background:var(--c-inpaint)"></span><span class="scard-num" style="color:var(--c-inpaint)">STAGE 04</span><h3>Inpainting</h3><p>border-uniformity safe-fill: erode polygon + วัด std เพื่อลบข้อความโดยไม่กินขอบ</p></a>
+      <a class="stage-card" href="rendering.html"><span class="bar" style="background:var(--c-render)"></span><span class="scard-num" style="color:var(--c-render)">STAGE 05</span><h3>Rendering</h3><p>Largest Inscribed Rectangle + auto font-size + ตัดคำต่อภาษา + supersample</p></a>
+      <a class="stage-card" href="architecture.html"><span class="bar" style="background:var(--c-arch)"></span><span class="scard-num" style="color:var(--c-arch)">SYSTEM</span><h3>สถาปัตยกรรม &amp; API</h3><p>Pydantic schema, FastAPI endpoints, streaming, per-request config, userscript</p></a>
+      <a class="stage-card" href="eval.html"><span class="bar" style="background:var(--c-future)"></span><span class="scard-num" style="color:var(--c-future)">📊 EVALUATION</span><h3>การวัดผล</h3><p>reference-free metrics + LLM-judge บน 31 หน้า/255 ฟอง — เทียบ text-only vs image-process พร้อมผลภาพจริง</p></a>
+    </div>
+
+    <div class="foot">
+      <span>MangaTVL — เอกสารอ้างอิง: <code>report.md</code>, <code>README.md</code>, <code>CHANGELOG.md</code></span>
+      <span>เว็บไซต์อธิบายโปรเจกต์ · จัดหมวดหมู่ตาม pipeline</span>
+    </div>
+
+    <div class="pager">
+      <span></span>
+      <a class="next" href="detection.html"><div class="pg-dir">ถัดไป →</div><div class="pg-title">Stage 1 · Detection</div></a>
+    </div>
+
+  </div>
+  </main>
+</div>
+<script src="assets/js/site.js"></script>
+</body>
+</html>

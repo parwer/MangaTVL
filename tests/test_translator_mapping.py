@@ -109,7 +109,18 @@ def test_per_call_language_builds_distinct_system_prompts():
     asyncio.run(t.translate([_ocr("AAA")], to_lang="Japanese"))
     sp_jp = t.last_kwargs["system_prompt"]
     assert sp_thai != sp_jp                      # language override changes the prompt
-    assert set(t._prompt_cache.keys()) == {("English", "Thai"), ("English", "Japanese")}
+    assert set(t._prompt_cache.keys()) == {("English", "Thai", ""), ("English", "Japanese", "")}
+
+
+def test_custom_instruction_changes_prompt_and_cache_key():
+    t = FakeTranslator(json.dumps([{"text_no": 0, "translated_text": "x"}]))
+    asyncio.run(t.translate([_ocr("AAA")]))
+    sp_default = t.last_kwargs["system_prompt"]
+    asyncio.run(t.translate([_ocr("AAA")], custom_instruction="keep honorifics"))
+    sp_custom = t.last_kwargs["system_prompt"]
+    assert sp_custom != sp_default                # custom instruction alters the prompt
+    assert "keep honorifics" in sp_custom         # ...and is actually injected
+    assert ("English", "Thai", "keep honorifics") in t._prompt_cache
 
 
 def test_result_count_always_matches_input():

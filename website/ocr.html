@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stage 2 · OCR — MangaTVL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+<button class="menu-btn" aria-label="menu">☰</button>
+<div class="layout">
+
+  <aside class="sidebar">
+    <a class="brand" href="index.html">
+      <span class="logo">漫</span>
+      <span><span class="name">MangaTVL</span><br><span class="sub">EN → TH manga translator</span></span>
+    </a>
+    <nav class="nav-group">
+      <h4>เริ่มต้น</h4>
+      <a class="nav-link" href="index.html"><span class="num">◎</span> ภาพรวม &amp; ที่มา</a>
+      <a class="nav-link" href="architecture.html"><span class="num">⌗</span> สถาปัตยกรรม &amp; API</a>
+    </nav>
+    <nav class="nav-group">
+      <h4>Pipeline · 5 สเตจ</h4>
+      <a class="nav-link" data-stage="detect"  href="detection.html"><span class="num">1</span> Detection</a>
+      <a class="nav-link active" data-stage="ocr"     href="ocr.html"><span class="num">2</span> OCR</a>
+      <a class="nav-link" data-stage="trans"   href="translation.html"><span class="num">3</span> Translation</a>
+      <a class="nav-link" data-stage="inpaint" href="inpainting.html"><span class="num">4</span> Inpainting</a>
+      <a class="nav-link" data-stage="render"  href="rendering.html"><span class="num">5</span> Rendering</a>
+    </nav>
+    <nav class="nav-group">
+      <h4>เพิ่มเติม</h4>
+      <a class="nav-link" href="eval.html"><span class="num">📊</span> Evaluation</a>
+      <a class="nav-link" href="roadmap.html"><span class="num">⚑</span> ปัญหา &amp; อนาคต</a>
+    </nav>
+  </aside>
+
+  <main class="main">
+  <div class="content">
+
+    <header class="page-head">
+      <span class="kicker"><span class="dot" style="background:var(--c-ocr)"></span> Stage 02 · OCR</span>
+      <h1>อ่านข้อความทีละฟอง — ทาขาวนอก polygon ก่อนอ่าน</h1>
+      <p class="lead">แทนที่จะ OCR ทั้งหน้าทีเดียว ระบบ <strong>crop ต่อฟอง</strong> แล้ว <strong>ทาขาวทุกอย่างนอก polygon</strong> (clean_poly) เพื่อให้ OCR เห็นเฉพาะข้อความในฟองนั้น</p>
+    </header>
+
+    <div class="io-flow">
+      <span class="io-chip">image + DetectionResult[]</span>
+      <span class="io-arrow">→ get_ocr() →</span>
+      <span class="io-chip" style="border-color:var(--c-ocr)">OCRResult[ ]</span>
+    </div>
+
+    <h2>ปัญหา: ทำไมไม่ OCR ทั้งภาพรวด ๆ</h2>
+    <div class="callout problem">
+      <span class="ci">🔴</span>
+      <p><strong>OCR overlap ข้ามฟอง</strong> — ถ้า crop เป็นสี่เหลี่ยม กรอบจะกินข้อความฟองข้าง ๆ (ดูได้จาก <a href="detection.html">Stage 1</a>) ทำให้ข้อความสองฟองปนกัน เป็นโจทย์ตั้งต้นที่ v1 เจอ</p>
+    </div>
+    <p>ทางแก้คือใช้ polygon จากสเตจ Detection มา "ลบ noise นอกฟอง" ก่อน — กดเดินทีละขั้นด้านล่าง:</p>
+
+    <!-- VIZ stepper: crop -> (no clean = fail) -> clean_poly -> OCR -->
+    <div class="viz" data-stepper
+         data-captions="<strong>ขั้นที่ 1 — crop ตาม bbox ของฟองเป้าหมาย:</strong> เพราะ bbox เป็นสี่เหลี่ยม มันจึงคีบของที่ <em>ไม่ใช่ข้อความในฟอง</em> ติดมาด้วย — เศษคำจากฟองข้างเคียง ('IT!'), เสียงเอฟเฟกต์ SFX ('ZAP!'), และเส้นลายพื้นหลัง||
+<strong>❌ ขั้นที่ 2 — ถ้า&lt;u&gt;ไม่&lt;/u&gt;clean:</strong> OCR เห็นทุก pixel ในกรอบ จึงอ่าน noise ปนเข้ามาเป็นก้อนเดียว — text กลายเป็น 'IT! ZAP ME NEITHER PAL' ส่งให้ translator ทั้งก้อน → คำแปลปน SFX/คำของฟองอื่น และไปลงผิดฟอง||
+<strong>✓ ขั้นที่ 3 — clean_poly:</strong> สร้าง mask จาก polygon ของฟอง แล้วทาขาวทุก pixel <em>นอก</em> polygon (<code>arr[mask==0]=255</code>) → เศษฟองข้างเคียง, SFX, เส้นลาย หายหมด เหลือเฉพาะข้อความในฟอง||
+<strong>✓ ขั้นที่ 4 — OCR หลัง clean:</strong> อ่าน crop ที่สะอาด ได้ข้อความถูกต้อง 'ME NEITHER PAL...' + box ต่อบรรทัด แล้ว map พิกัด box กลับสู่ภาพเต็ม">
+      <div class="viz-title">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h3M20 7V4h-3M4 17v3h3M20 17v3h-3"/><rect x="8" y="9" width="8" height="6"/></svg>
+        crop → (ถ้าไม่ clean = พัง) → clean_poly → OCR
+      </div>
+
+      <!-- step 1 : crop captures noise outside the bubble -->
+      <div data-step="1">
+        <svg viewBox="0 0 560 240" width="100%" style="max-height:300px">
+          <rect width="560" height="240" fill="#0e1320" rx="8"/>
+          <!-- crop frame -->
+          <rect x="56" y="28" width="300" height="184" fill="#f4f1ea" stroke="var(--c-ocr)" stroke-width="3"/>
+          <text x="60" y="22" class="lbl" fill="var(--c-ocr)">crop = image.crop(bbox)  ← สี่เหลี่ยม</text>
+          <!-- target bubble outline (guide) -->
+          <ellipse cx="206" cy="120" rx="120" ry="74" fill="none" stroke="#c5c0b4" stroke-width="2" stroke-dasharray="5 4"/>
+          <text x="206" y="116" text-anchor="middle" font-family="JetBrains Mono" font-size="15" fill="#222" font-weight="700">ME NEITHER</text>
+          <text x="206" y="142" text-anchor="middle" font-family="JetBrains Mono" font-size="15" fill="#222" font-weight="700">PAL...</text>
+          <!-- noise: neighbor word (top-left corner, outside ellipse) -->
+          <text x="92" y="52" font-family="JetBrains Mono" font-size="14" fill="#c0392b" font-weight="700">...IT!</text>
+          <!-- noise: SFX (top-right corner) -->
+          <text x="296" y="54" font-family="JetBrains Mono" font-size="16" fill="#c0392b" font-weight="800" transform="rotate(-12 312 50)">ZAP!</text>
+          <!-- noise: background art line (bottom-left) -->
+          <path d="M70 196 q34 -20 78 -6 q24 8 40 -4" fill="none" stroke="#9a958a" stroke-width="2.5"/>
+          <!-- labels -->
+          <text x="372" y="84"  class="lbl-w" fill="var(--c-detect)">noise นอกฟอง:</text>
+          <text x="372" y="108" class="lbl" fill="var(--text-dim)">• เศษคำฟองข้างเคียง (IT!)</text>
+          <text x="372" y="130" class="lbl" fill="var(--text-dim)">• SFX วาดมือ (ZAP!)</text>
+          <text x="372" y="152" class="lbl" fill="var(--text-dim)">• เส้นลายพื้นหลัง</text>
+        </svg>
+      </div>
+
+      <!-- step 2 : WITHOUT clean -> garbage merged OCR -->
+      <div data-step="2" style="display:none">
+        <svg viewBox="0 0 560 240" width="100%" style="max-height:300px">
+          <rect width="560" height="240" fill="#0e1320" rx="8"/>
+          <text x="36" y="22" class="lbl" fill="var(--c-detect)">❌ ข้าม clean_poly → OCR ทั้งกรอบ</text>
+          <!-- mini crop with red detection boxes around EVERYTHING -->
+          <rect x="36" y="34" width="210" height="166" fill="#f4f1ea" stroke="#2a3344" stroke-width="2"/>
+          <rect x="52" y="44" width="56" height="22" fill="none" stroke="var(--c-detect)" stroke-width="2"/>
+          <text x="58" y="60" font-family="JetBrains Mono" font-size="12" fill="#222" font-weight="700">IT!</text>
+          <rect x="170" y="44" width="62" height="24" fill="none" stroke="var(--c-detect)" stroke-width="2"/>
+          <text x="178" y="62" font-family="JetBrains Mono" font-size="12" fill="#222" font-weight="700">ZAP!</text>
+          <rect x="60" y="108" width="150" height="22" fill="none" stroke="var(--c-detect)" stroke-width="2"/>
+          <text x="66" y="124" font-family="JetBrains Mono" font-size="12" fill="#222" font-weight="700">ME NEITHER</text>
+          <rect x="60" y="138" width="80" height="22" fill="none" stroke="var(--c-detect)" stroke-width="2"/>
+          <text x="66" y="154" font-family="JetBrains Mono" font-size="12" fill="#222" font-weight="700">PAL...</text>
+          <!-- arrow -->
+          <path d="M250 116 h26" stroke="var(--text-mute)" stroke-width="2" marker-end="url(#arBad)"/>
+          <defs><marker id="arBad" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 z" fill="var(--text-mute)"/></marker></defs>
+          <!-- merged OCRResult (red) -->
+          <rect x="284" y="44" width="256" height="96" rx="8" fill="#1a0e12" stroke="var(--c-detect)" stroke-width="1.5"/>
+          <text x="296" y="66" font-family="JetBrains Mono" font-size="11" fill="#f87171">OCRResult(text=</text>
+          <text x="306" y="86" font-family="JetBrains Mono" font-size="12" fill="#fca5a5" font-weight="700">"IT! ZAP ME</text>
+          <text x="306" y="104" font-family="JetBrains Mono" font-size="12" fill="#fca5a5" font-weight="700">NEITHER PAL")</text>
+          <text x="296" y="126" font-family="JetBrains Mono" font-size="10" fill="#9a6a72">← 3 แหล่งปนกันเป็นก้อนเดียว</text>
+          <!-- consequence bar -->
+          <rect x="36" y="170" width="504" height="42" rx="8" fill="rgba(239,68,68,.10)" stroke="var(--c-detect)" stroke-width="1"/>
+          <text x="50" y="196" font-family="Inter, Noto Sans Thai" font-size="13" fill="#f8a5a5" font-weight="600">✗ translator แปลทั้งก้อน → คำแปลมี SFX + คำฟองอื่นปน และวางผิดฟอง</text>
+        </svg>
+      </div>
+
+      <!-- step 3 : clean_poly whites out everything outside the polygon -->
+      <div data-step="3" style="display:none">
+        <svg viewBox="0 0 560 240" width="100%" style="max-height:300px">
+          <rect width="560" height="240" fill="#0e1320" rx="8"/>
+          <rect x="56" y="28" width="300" height="184" fill="#ffffff" stroke="var(--c-render)" stroke-width="3"/>
+          <text x="60" y="22" class="lbl" fill="var(--c-render)">clean_poly(crop, segmentation)</text>
+          <!-- kept polygon area -->
+          <ellipse cx="206" cy="120" rx="120" ry="74" fill="#f4f1ea" stroke="var(--c-render)" stroke-width="2.5" stroke-dasharray="5 3"/>
+          <text x="206" y="116" text-anchor="middle" font-family="JetBrains Mono" font-size="15" fill="#222" font-weight="700">ME NEITHER</text>
+          <text x="206" y="142" text-anchor="middle" font-family="JetBrains Mono" font-size="15" fill="#222" font-weight="700">PAL...</text>
+          <!-- erased noise (ghosted = whited) -->
+          <text x="92" y="52" font-family="JetBrains Mono" font-size="14" fill="#efefef" font-weight="700">...IT!</text>
+          <text x="296" y="54" font-family="JetBrains Mono" font-size="16" fill="#efefef" font-weight="800" transform="rotate(-12 312 50)">ZAP!</text>
+          <path d="M70 196 q34 -20 78 -6 q24 8 40 -4" fill="none" stroke="#f2f2f2" stroke-width="2.5"/>
+          <text x="372" y="100" class="lbl-w" fill="var(--c-render)">นอก polygon = ขาว ✓</text>
+          <text x="372" y="124" class="lbl" fill="var(--text-mute)">arr[mask == 0] = 255</text>
+          <text x="372" y="150" class="lbl" fill="var(--c-render)">noise หายหมด</text>
+        </svg>
+      </div>
+
+      <!-- step 4 : OCR on the cleaned crop -> correct result -->
+      <div data-step="4" style="display:none">
+        <svg viewBox="0 0 560 240" width="100%" style="max-height:300px">
+          <rect width="560" height="240" fill="#0e1320" rx="8"/>
+          <text x="36" y="22" class="lbl" fill="var(--c-render)">✓ OCR(crop ที่สะอาด)</text>
+          <rect x="36" y="34" width="220" height="166" fill="#ffffff" stroke="#2a3344" stroke-width="2"/>
+          <rect x="64" y="92" width="158" height="26" fill="none" stroke="var(--c-trans)" stroke-width="2"/>
+          <text x="72" y="111" font-family="JetBrains Mono" font-size="14" fill="#222" font-weight="700">ME NEITHER</text>
+          <rect x="64" y="126" width="92" height="26" fill="none" stroke="var(--c-trans)" stroke-width="2"/>
+          <text x="72" y="145" font-family="JetBrains Mono" font-size="14" fill="#222" font-weight="700">PAL...</text>
+          <!-- arrow -->
+          <path d="M260 116 h26" stroke="var(--text-mute)" stroke-width="2" marker-end="url(#arOk)"/>
+          <defs><marker id="arOk" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6 z" fill="var(--text-mute)"/></marker></defs>
+          <!-- clean OCRResult (green) -->
+          <rect x="294" y="56" width="246" height="120" rx="8" fill="#0a0d14" stroke="var(--c-render)" stroke-width="1.5"/>
+          <text x="306" y="80" font-family="JetBrains Mono" font-size="11" fill="#9ece6a">OCRResult(</text>
+          <text x="316" y="100" font-family="JetBrains Mono" font-size="11" fill="#c7d6ea">text="ME NEITHER</text>
+          <text x="316" y="116" font-family="JetBrains Mono" font-size="11" fill="#c7d6ea">PAL...",</text>
+          <text x="316" y="136" font-family="JetBrains Mono" font-size="11" fill="#c7d6ea">boxes=[...],</text>
+          <text x="316" y="152" font-family="JetBrains Mono" font-size="11" fill="#c7d6ea">detection=det)</text>
+          <text x="306" y="170" font-family="JetBrains Mono" font-size="11" fill="#9ece6a">)</text>
+        </svg>
+      </div>
+
+      <div class="viz-controls">
+        <button class="btn" data-step-prev>← ก่อนหน้า</button>
+        <div class="step-dots" data-dots></div>
+        <button class="btn primary" data-step-next>ขั้นถัดไป →</button>
+      </div>
+      <div class="viz-caption" data-step-caption></div>
+    </div>
+
+    <h2>Code: <code>clean_poly</code></h2>
+    <p>เป็น method บน base <code>OCREngine</code> ใช้ร่วมทุก backend — ถ้าไม่มี polygon (detect-only) จะคืนภาพเดิม:</p>
+    <pre><code><span class="tok-key">def</span> <span class="tok-fn">clean_poly</span>(self, cropped_image, poly, offset=(<span class="tok-num">0</span>,<span class="tok-num">0</span>), fill=(<span class="tok-num">255</span>,<span class="tok-num">255</span>,<span class="tok-num">255</span>)):
+    <span class="tok-key">if</span> poly <span class="tok-key">is None or</span> len(poly) == <span class="tok-num">0</span>:
+        <span class="tok-key">return</span> cropped_image          <span class="tok-com"># detect-only → คืนเดิม</span>
+    pts  = np.array(poly) - np.array(offset)   <span class="tok-com"># shift polygon เข้ากรอบ crop</span>
+    mask = np.zeros(...); cv2.<span class="tok-fn">fillPoly</span>(mask, [pts], <span class="tok-num">255</span>)
+    arr[mask == <span class="tok-num">0</span>] = fill            <span class="tok-com"># นอก polygon = ขาว</span>
+    <span class="tok-key">return</span> Image.fromarray(arr)</code></pre>
+
+    <p>loop หลักของ OCR เหมือนกันทุก engine — crop → clean → อ่าน → map box กลับสู่พิกัดภาพเต็ม:</p>
+    <pre><code><span class="tok-key">for</span> det <span class="tok-key">in</span> detection_results:
+    x1, y1, x2, y2 = det.bbox
+    cropped = image.<span class="tok-fn">crop</span>((x1, y1, x2, y2))
+    cropped = self.<span class="tok-fn">clean_poly</span>(cropped, det.segmentation, offset=(x1, y1))
+    text, boxes = self.<span class="tok-fn">ocr</span>(cropped)
+    mapped = [[xmin+x1, ymin+y1, xmax+x1, ymax+y1] <span class="tok-key">for</span> ... <span class="tok-key">in</span> boxes]
+    ocr_results.append(<span class="tok-fn">OCRResult</span>(text=text, boxes=mapped, detection_result=det))</code></pre>
+
+    <h2>เลือก OCR engine ตามภาษาต้นทาง</h2>
+    <p>engine ถูกเลือกจาก <code>from_lang</code> ผ่าน <code>languages.json</code> และถูก cache หนึ่งตัวต่อภาษา (ครั้งแรกของภาษาใหม่จึงโหลดโมเดล):</p>
+    <table>
+      <thead><tr><th>Engine</th><th>ใช้กับ</th><th>เหตุผล</th></tr></thead>
+      <tbody>
+        <tr><td><code>EasyOCREngine</code> <span class="badge ok">default</span></td><td>อังกฤษ + ภาษาแนวนอนทั่วไป</td><td>อ่าน printed text แนวนอนได้ดี</td></tr>
+        <tr><td><code>MangaOCREngine</code></td><td><code>from_lang: japanese</code></td><td>train เฉพาะมังงะญี่ปุ่น รองรับข้อความ <strong>แนวตั้ง</strong> (tategaki); โหลดโมเดล ~400MB แบบ lazy</td></tr>
+        <tr><td><code>PaddleOCREngine</code></td><td>ทางเลือก</td><td>ใช้ pipeline เดียวกัน; ต้องตั้ง <code>enable_mkldnn=False</code> กัน crash บน Paddle 3.3</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout problem">
+      <span class="ci">🔴</span>
+      <p><strong>ข้อจำกัด:</strong> printed text อ่านได้ดี แต่ <strong>SFX / ตัวอักษรวาดมือ</strong> (เช่น "NOOOO", "HAA HAA") ออกมาเป็น gibberish ทุก engine เพราะเทรนจาก font พิมพ์ — ดูแนวทางใน <a href="roadmap.html">ปัญหา &amp; อนาคต</a></p>
+    </div>
+
+    <div class="pager">
+      <a href="detection.html"><div class="pg-dir">← ก่อนหน้า</div><div class="pg-title">Stage 1 · Detection</div></a>
+      <a class="next" href="translation.html"><div class="pg-dir">ถัดไป →</div><div class="pg-title">Stage 3 · Translation</div></a>
+    </div>
+
+  </div>
+  </main>
+</div>
+<script src="assets/js/site.js"></script>
+</body>
+</html>

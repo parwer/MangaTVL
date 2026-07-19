@@ -4,6 +4,192 @@
 
 ---
 
+## [2026-07-02 22:05] tempomunkey ส่ง custom instruction (ต่อยอด guidelines) ต่อ request
+
+**ประเภท:** เพิ่ม feature
+
+**รายละเอียด:**
+- ให้ผู้ใช้ส่ง "custom instruction" (เช่น คงคำ honorific, โทนสุภาพ, แปล SFX ตรงตัว) ไปมีผลกับการแปลต่อ request — ต่อยอดจาก `DEFAULT_GUIDELINE_PROMPT`
+- `translator.py`: `translate(..., custom_instruction=None)` — เพิ่ม `_merge_guidelines()` เอา base guidelines (ของ translator หรือ default) + custom instruction (มาร์กเป็น highest-priority) ; `_system_prompt(from_lang, to_lang, custom_instruction)` เปลี่ยน cache key เป็น 3-tuple `(from_lang, to_lang, custom_instruction)` → prompt ต่าง instruction ไม่ปนกัน (build_system_prompt เดิม cache ตามภาษาเท่านั้น)
+- thread ผ่าน `pipeline` (run/run_batch/run_batch_stream/_run_on_image) → `main.py` field `custom_instruction` ใน TranslateRequest (ทั้ง `/translate/` + `/translate/stream/`)
+- `tempomunkey.user.js`: เพิ่ม `<textarea>` "custom instruction" ใน Settings, persist `mtvl_custom_instruction`, ส่งใน body เมื่อกรอก
+- backward-compat: ไม่ส่ง → guidelines เดิม (prompt เท่าเดิม)
+- verify: `pytest` 78 passed (เพิ่มเคส custom_instruction เปลี่ยน prompt+cache key; อัปเดตเคส cache key เดิมเป็น 3-tuple) + `node --check` + `py_compile`
+
+**ไฟล์ที่แก้ไข:**
+- `manga_translator/translators/translator.py` — `_merge_guidelines` + `custom_instruction` ใน translate/_system_prompt
+- `pipeline.py`, `main.py` — thread `custom_instruction`
+- `tempomunkey.user.js` — textarea + persist + ส่ง
+- `tests/test_translator_mapping.py` — เคสใหม่ + อัปเดต cache-key assertion
+- `README.md` — doc field + userscript
+
+---
+
+## [2026-07-02 22:04] judge (eval) เห็น 2 รูป (original + rendered) + แก้บั๊ก prompt .format
+
+**ประเภท:** เพิ่ม feature / แก้ bug
+
+**รายละเอียด:**
+- ให้ LLM-as-judge เห็น **2 รูปหน้าเดียวกัน**: ORIGINAL (ข้อความต้นฉบับในฟอง) + RENDERED (คำแปลที่วาดกลับ) เป็นบริบท → คะแนน adequacy/fluency ตรงบริบทจริงขึ้น (คง 2 แกนเดิม ไม่เพิ่ม typesetting → ไม่แตะ metrics/schema)
+- `judge.py`: `_call(..., images=None)` รับ list `(label, b64)` แนบหลายรูป (openrouter: text+image_url parts, gemini: Part.from_text+from_bytes); `run_judge(..., original_image, rendered_image)` แทน `image` เดียว; prompt อธิบาย 2 รูป + ย้ำห้ามให้คะแนน layout
+- **แก้บั๊กเดิม**: `JUDGE_SYSTEM` มีตัวอย่าง JSON `{"text_no": 0,...}` วงเล็บเดี่ยว → `.format()` ตีความเป็น field → `KeyError` ทุกครั้งที่เรียก judge; escape เป็น `{{ }}`
+- `run_eval.py` / `compare_eval.py`: ส่ง original+rendered (resize + detail:low คุม token) เข้า judge; `compare_eval` **ย้าย judge มาหลัง render** (live) เพื่อมีรูป rendered ต่อ variant (reuse path โหลด judge จาก cache เหมือนเดิม); เพิ่ม flag `--judge-no-images` สำหรับ judge model แบบ text-only
+- verify: `pytest tests/test_judge.py` (FakeClient) — 2 image parts + label + parse ถูก, ไม่มีรูป=string content, 1 รูป=1 part; suite รวม 78 passed
+
+**ไฟล์ที่แก้ไข:**
+- `eval/judge.py` — multi-image `_call`, `run_judge` original/rendered, prompt 2 รูป, แก้ `.format` brace bug
+- `eval/run_eval.py`, `eval/compare_eval.py` — ส่ง 2 รูป + `--judge-no-images` (+ compare: render-before-judge)
+- `tests/test_judge.py` (ไฟล์ใหม่) — FakeClient assert 2 labeled images + parsing
+- `eval/README.md` — doc judge 2 รูป + vision-model note
+
+---
+
+## [2026-06-26 14:17] โหมดเทียบ: เพิ่มคะแนนสเตจ 4/5 + เซฟรูป intermediate (log สมบูรณ์)
+
+**ประเภท:** เพิ่ม feature
+
+**รายละเอียด:**
+- `eval/compare_eval.py` เพิ่มการวัด **สเตจ 4 (Inpainting) + 5 (Rendering)** เข้า compare.md (เดิมมีแค่ translation+judge)
+- **Inpaint วัดครั้งเดียวต่อหน้า** เพราะไม่ขึ้นกับคำแปล (`InpainterBase.inpaint` ใช้แค่ ocr box/polygon, `parse_inputs` ทิ้ง translated_text) → รายงานเป็นคอลัมน์เดียว "เท่ากันทั้ง 2 variant"
+- **Render วัดต่อ variant** เพราะข้อความต่างความยาว → เทียบ spill/fill/truncate/font/lines เป็น Δ
+- เซฟรูป intermediate **7 ไฟล์/หน้า** ลง `images/<id>/`: original, overlay (polygon+bbox), inpainted, rendered_text_only, rendered_image, text_mask_text_only, text_mask_image — เปิด default (มี `--no-images` ปิด); reuse `eval/artifacts.py` (`_save`/`polygon_overlay`)
+- เพิ่มโหมด `--reuse <run_dir>`: replay คำแปล+judge จาก cache (ไม่เรียก API) คำนวณเฉพาะ inpaint/render — ไว้เติมสเตจ 4/5 ให้ run เดิมโดยไม่เสียค่า LLM
+- pairs.jsonl เพิ่ม field `inpaint{std_reduction,ink_removed,...}` + render (spill/fill/font/truncated) ต่อ variant
+- **ผลรันสด 34 ภาพ (255 bubbles):** image-process: adequacy +0.13 (4.79→4.92), fluency +0.106, fallback −0.027, token ~2 เท่า; inpaint std_reduction 0.90/ink_removed 0.95; render font เฉลี่ยใกล้กัน (image เล็กกว่าเล็กน้อยเพราะคำแปลยาวกว่า)
+
+**ไฟล์ที่แก้ไข:**
+- `eval/compare_eval.py` — เพิ่มสเตจ 4/5, เซฟรูป (`--no-images`), โหมด `--reuse`
+- `eval/judge.py` — `_call` คืน `(text, usage)` เพื่อเก็บ token/cost ของ judge (เดิม cost=0)
+
+---
+
+## [2026-06-26 13:35] เพิ่มโหมดเทียบ text-only vs image-process (สเตจ Translation)
+
+**ประเภท:** เพิ่ม feature
+
+**รายละเอียด:**
+- เพิ่ม `eval/compare_eval.py` วัดว่าการส่งรูปหน้าให้ตัวแปล (`process_image`) ช่วยคุณภาพการแปลจริงไหม — ต่อหน้า: detect+ocr รอบเดียว แล้วแปล **2 รอบ** (text-only / image-process) + judge ทั้งคู่
+- ตามที่ผู้ใช้กำหนด: **judge แนบรูปหน้าเสมอทั้ง 2 variant** → judge ตัดสินจากบริบทภาพจริง และ self-bias คงที่ทั้งสองฝั่งจึงหักล้างกันใน Δ (เทียบได้ แม้ judge ใช้ model เดียวกับ translator)
+- ให้ `eval/judge.py` แนบรูปได้ (`_call`/`run_judge` รับ `image=`): openai-compatible ส่ง multimodal `image_url`, gemini ส่ง `Part.from_bytes` — เลียนแบบ path ของ translator; เก็บ `image_attached` + `usage` (token/cost) ใน raw
+- ผลที่ `eval/results/<ts>-compare/`: `compare.md` (ตาราง metric|text-only|image|Δ + token/cost), `pairs.jsonl` (จับคู่ต่อ bubble สาวกลับได้), `compare.json`, `raw/<id>.json` (raw req/resp/usage ของ translate+judge ทั้ง 4 call ต่อรูป)
+- reuse ของเดิมทั้งหมด (translator capture hook, translation_metrics, run_judge, aggregate) ไม่แตะ run_eval/harness/metrics/translator
+- **ผลรันจริง 34 ภาพ (255 bubbles, 31 ok/3 skip):** image-process ดีกว่าเล็กน้อยทุก metric — adequacy +0.117 (4.77→4.89), fluency +0.071, fallback −0.019 — แต่ใช้ token ~2 เท่า (993→2092/หน้า) cost แปล $0.034→$0.053; พบ insight: หน้าเลขหน้า "6" ฝั่ง image ตีความเป็น "ตอนที่ 29" จากบริบทภาพ (over-interpret)
+
+**ไฟล์ที่แก้ไข:**
+- `eval/compare_eval.py` (ไฟล์ใหม่) — driver เทียบ 2 variant + เขียน pairs/compare/raw
+- `eval/judge.py` — `_call`/`run_judge` รองรับ `image=` (multimodal) + คืน/เก็บ `usage`
+- `eval/README.md` — เพิ่มหัวข้อโหมดเทียบ
+
+---
+
+## [2026-06-26 13:02] รื้อ eval เป็น batch + raw-data logging ที่ตรวจสอบย้อนกลับได้
+
+**ประเภท:** refactor + เพิ่ม feature
+
+**รายละเอียด:**
+- รื้อ eval ให้รันทั้ง dataset เป็น **1 run** ที่ตรวจย้อนกลับได้ (เดิมเป็น for-loop เก็บ metric สรุปอย่างเดียว สาวกลับไม่ได้)
+- **capture hook ใน production translator** (backward-compatible 100%): `translate(..., capture: dict|None=None)` + `_translate(..., capture=None)` — ถ้าส่ง dict จะเก็บ `system_prompt`, `user_input`, `raw_response` (string ดิบ), `usage` (token+cost), `parsed` (map text_no→คำแปล); ค่า default `None` → production (main.py/pipeline.py) ไม่กระทบ และ **forward capture เฉพาะเมื่อไม่ None** เพื่อให้ `_translate` override ที่ไม่มี param นี้ยังทำงาน (test เดิม 74 ตัวผ่านครบ)
+- โครงสร้างผลลัพธ์ใหม่ `eval/results/<run_id>/`: `config.json` (param + JSON schema ของ 3 data contract + git commit + รายชื่อไฟล์), `manifest.json` (status/bubble/timing ต่อรูป), `corpus.json`, `summary.md`, **`bubbles.jsonl`** (1 บรรทัด/bubble มี provenance + raw text + metric ทุกสเตจ — ตาราง audit หลัก), **`images/<id>.json`** (raw ทุกสเตจต่อรูป รวม raw LLM req/resp/token + judge raw)
+- `Capture` เก็บ `image_id` (จาก path relative, sanitize), `params` snapshot (detector conf/iou, ocr engine, inpainter/renderer), `translation_raw`/`judge_raw`, + `to_record()` serialize JSON-safe
+- ทุก per-bubble metric ใส่ `bubble_index` เป็น provenance (aggregate ข้าม field นี้)
+- flag `--save-images`: เซฟ original/inpainted/rendered/text_mask/polygon-overlay ต่อรูป (default ปิด)
+- ตรวจแล้ว: audit `target_script_ratio` ด้วยมือตรงกับ log, `parsed[0]==translated_text`, real run เก็บ token+cost ($0.0019/หน้า) ครบ
+
+**ไฟล์ที่แก้ไข:**
+- `manga_translator/translators/translator.py` — capture hook ใน `translate`/`_translate` + helper `_usage_to_dict`
+- `manga_translator/translators/gemini.py` — capture ใน `_translate` (usage_metadata)
+- `eval/harness.py` — `Capture` ขยาย (image_id/params/raw/to_record) + ส่ง capture sink
+- `eval/run_eval.py` — เขียน driver/output layout ใหม่ (run_id, manifest, bubbles.jsonl, images/<id>.json, config+schema)
+- `eval/metrics.py` — เติม `bubble_index` ทุก per-record
+- `eval/judge.py` — คืน `raw` (req/resp/usage) + `bubble_index`
+- `eval/artifacts.py` (ไฟล์ใหม่) — เซฟภาพ intermediate + polygon overlay
+- `eval/README.md` — อธิบาย layout ใหม่ + raw log + การ audit
+
+---
+
+## [2026-06-26 12:35] เพิ่ม LLM-as-judge (opt-in) วัดคุณภาพการแปลเชิงความหมาย
+
+**ประเภท:** เพิ่ม feature
+
+**รายละเอียด:**
+- เพิ่ม flag `--judge` ใน eval: เป็น API call **ที่ 2 แยกต่างหาก** รัน *หลัง* แปลเสร็จ — เอาคู่ `source → translated` ที่ translator ผลิตแล้วส่งให้ LLM ให้คะแนน ไม่ได้แปลใหม่
+- prompt ของ judge เป็น **rubric แยก** (ไม่ใช่ SYSTEM_PROMPT ของการแปล): ให้คะแนน `adequacy` (ความหมายตรง 1–5) + `fluency` (ภาษาเป้าหมายเป็นธรรมชาติ 1–5) คืน JSON array map ด้วย `text_no`
+- เพิ่ม metric `mean_adequacy`, `mean_fluency`, `low_adequacy_rate` เข้า summary; bubble ที่ judge ไม่คืนคะแนนถูกข้าม (ไม่ลงโทษ)
+- รองรับ `--judge-provider` / `--judge-model` แยกจาก translator; dispatch ได้ทั้ง openrouter/groq (chat.completions) และ gemini (genai)
+- **self-bias guard:** ถ้า judge ใช้ model เดียวกับ translator → set flag `self_judged=true` และ summary.md ขึ้น ⚠️ เตือนว่าคะแนนเอนสูง (ทดสอบจริงได้ 5.0/5.0 รวด = สะท้อน self-preference bias ตามคาด) — ปัจจุบัน default ใช้ model เดียวกันไปก่อนตามที่ตั้งใจ
+
+**ไฟล์ที่แก้ไข:**
+- `eval/judge.py` (ไฟล์ใหม่) — rubric prompt + dispatch ต่อ provider + parse/aggregate คะแนน
+- `eval/run_eval.py` — เพิ่ม flag `--judge`/`--judge-provider`/`--judge-model`, เรียก judge ต่อหน้า, รวมผล + section ใน summary.md
+- `eval/README.md` — เพิ่มหัวข้อ LLM-as-judge + คำเตือน self-bias + ตัวอย่างคำสั่ง
+
+---
+
+## [2026-06-26 12:21] เพิ่มชุดวัดผล reference-free (eval/) สำหรับสเตจ 3/4/5
+
+**ประเภท:** เพิ่ม feature
+
+**รายละเอียด:**
+- วัดผล Translation / Inpainting / Rendering บนภาพมังงะดิบโดย **ไม่ต้องมี ground-truth / คำแปลอ้างอิง / ภาพ clean** — ทุก metric ดึงจาก output กลางของ pipeline หรือจาก segmentation polygon ของ bubble
+- **สเตจ 3 (Translation):** `fallback_rate` (ตกกลับใช้ข้อความเดิม), `target_script_ratio` (สัดส่วนอักษรเป้าหมาย), `untranslated_rate`, `len_ratio` — จับ failure mode (API fail / model echo) โดยไม่ตัดสินความหมาย
+- **สเตจ 4 (Inpainting):** วัดในขอบเขต polygon ที่ erode เข้า — `interior_std` (ก่อน/หลัง + reduction) และ `ink_residual` (หมึกค้าง) เพื่อเช็คว่าลบ text ในฟองสะอาดแค่ไหน robust กับสีพื้นด้วย std_reduction
+- **สเตจ 5 (Rendering):** `spill_ratio`/`fill_ratio` วัดจาก diff ภาพ (หลัง render − หลัง inpaint = pixel ตัวอักษร) เทียบ polygon ว่าข้อความล้นนอกฟองไหม + `truncate_rate`/`font_size` โดยเรียกตรรกะ fit จริงของ `TextRenderer` ซ้ำ
+- harness เลียนแบบ `Pipeline._run_on_image` แบบไม่แตะ `pipeline.py` (ข้าม upscale เพื่อให้ภาพ render ขนาดตรงกับ polygon), รองรับ `--fake-translate` วัด 4/5 โดยไม่เสียค่า API
+- รวมผลแบบ micro-average ข้ามหน้า เขียน `metrics.json` (รายละเอียดต่อ bubble) + `summary.md` (ตารางไทย); validate จริงด้วย openrouter (`google/gemini-3-flash-preview`): fallback 0.05, อักษรไทย 90%, ink_removed 0.97, spill 0.0
+- **แก้บั๊ก:** `_ensure_provider_key` เช็ค env ก่อน `load_dotenv()` ของ pipeline ทำงาน → เห็น key ว่าง → ตั้ง `eval-dummy` แล้ว `load_dotenv` ไม่ override → 401 ทุก call; แก้โดย `load_dotenv()` ที่ต้น `run_eval.py`
+
+**ไฟล์ที่แก้ไข:**
+- `eval/harness.py` (ไฟล์ใหม่) — รัน pipeline 1 หน้า เก็บ intermediate ทุกสเตจเป็น `Capture` แบบไม่แตะ pipeline
+- `eval/metrics.py` (ไฟล์ใหม่) — ฟังก์ชัน metric ต่อสเตจ (translation/inpainting/rendering spill+fit)
+- `eval/run_eval.py` (ไฟล์ใหม่) — CLI driver: วน batch, รวมผล, เขียน JSON + summary.md
+- `eval/README.md` (ไฟล์ใหม่) — อธิบายนิยาม metric และวิธีรัน
+- `eval/__init__.py` (ไฟล์ใหม่) — docstring ของแพ็กเกจ
+- `.gitignore` — เพิ่ม `eval/results/` (output ที่ generate)
+
+---
+
+## [2026-06-26 11:44] แก้ scrape_images.py เก็บรูป lazy-load ไม่ครบ (ได้ 6 จาก 32)
+
+**ประเภท:** แก้ bug
+
+**รายละเอียด:**
+- อาการ: roliascan.com (Grand Blue ch29) มี 32 หน้า แต่ scrape ได้แค่ 6
+- debug จากหน้าจริง: หน้า 022–032 เป็น lazy — `src` เป็น data-URI placeholder (naturalWidth=24) ส่วน URL จริงอยู่ใน `data-src` → โดน skip (`data:`) + กรองด้วย min-width; และ `autoscroll` เดิมหยุดเร็วเพราะ placeholder จอง height ไว้ scrollHeight เลยนิ่งตั้งแต่ต้น → โหลดจริงแค่ ~6 หน้าแรก
+- แก้: 
+  - เพิ่ม **force-load lazy** (`_FORCE_LAZY_JS`): เซ็ต `img.src` จาก `data-src`/`data-lazy-src`/`data-original`/`data-lazy`/`data-url` + `loading=eager` → รูปโหลดจริงแม้อยู่นอก viewport
+  - เปลี่ยน `autoscroll` → `load_all_images`: scroll จนถึงล่างจริง + force-load ทุกรอบ, หยุดเมื่อจำนวนรูปที่โหลด (naturalWidth>1) นิ่ง (ไม่ใช่ scrollHeight)
+  - `collect_images`: เลือก URL จริงจาก `data-*` ด้วย (ไม่เอา data-URI), เก็บรูปที่วัดขนาดไม่ได้ (w=0 จาก lazy) ไว้แทนที่จะตัดทิ้ง
+  - เพิ่ม `--selector` (เช่น `img.comic-image`) เลือกเฉพาะรูปเนื้อหาเพื่อความแม่นยำ
+- verify: รันจริง URL เดิม → เจอ **32 รูป** (จาก 6), ดาวน์โหลด WEBP เปิดด้วย PIL ได้
+
+**ไฟล์ที่แก้ไข:**
+- `scrape_images.py` — force-load lazy + load_all_images + collect ใช้ data-src + `--selector`
+- `README.md` — อธิบาย lazy-load handling + `--selector`
+
+---
+
+## [2026-06-26 11:36] เพิ่ม scrape_images.py — scraper รูปจากเว็บ (Playwright) สำหรับชุด evaluate
+
+**ประเภท:** เพิ่ม feature
+
+**รายละเอียด:**
+- ทำ standalone scraper ดึงรูปจากหน้าเว็บมาเก็บเป็นชุดทดสอบ translator ("จะเอามา evaluate")
+- ใช้ **Playwright (headless chromium)** เพราะเว็บอ่านมังงะเป็น JS/lazy-load + กัน hotlink — requests/bs4 ใช้ไม่ได้
+- flow: เปิดหน้าแต่ละ URL → scroll ลงทีละช่วงจน scrollHeight นิ่ง (trigger lazy-load) → เก็บ `<img>` ที่กว้าง ≥ `--min-width` ตาม **DOM order** (มังงะคงลำดับหน้า) dedupe → ดาวน์โหลดผ่าน `context.request` (แชร์ cookie + ใส่ referer) **bypass hotlink** → เซฟ `eval/scraped/<page-slug>/001.jpg, 002.jpg...`
+- ตั้ง ext จาก content-type (jpg/png/webp/gif/avif), **ข้าม SVG/non-raster** (ไม่ใช่หน้ามังงะ), retry บน HTTP 429 + `--delay` กัน rate-limit
+- CLI: รับ URL หลายอัน หรือ `--urls-file`; options `--out/--min-width/--limit/--scroll-rounds/--delay/--headful/--timeout`
+- ติดตั้ง playwright 1.60.0 + chromium ใน MangaTVL_ENV; ใส่เป็น **optional** ใน requirement.txt (ไม่ใช่ dep ของ API runtime)
+- verify: `py_compile` + รันจริงบน Wikipedia → โหลด/scroll/เก็บ/ดาวน์โหลดได้, ไฟล์เป็น raster เปิดด้วย PIL ได้ (JPEG/PNG, ext ถูก), SVG ถูกข้าม, 429 retry ทำงาน
+- `eval/scraped/` ใส่ใน .gitignore (ไม่ commit รูป scraped)
+
+**ไฟล์ที่แก้ไข:**
+- `scrape_images.py` (ไฟล์ใหม่) — Playwright scraper
+- `requirement.txt` — comment optional playwright
+- `.gitignore` — ignore `eval/scraped/`
+- `README.md` — หัวข้อ "Scraping an evaluation set"
+
+---
+
 ## [2026-06-09 19:39] แก้ streaming ใน tempomunkey ไม่ทำงาน (รูปเปลี่ยนตอนจบพร้อมกัน)
 
 **ประเภท:** แก้ bug
