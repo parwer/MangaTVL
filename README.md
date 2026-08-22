@@ -1,6 +1,6 @@
 # MangaTVL
 
-A FastAPI service that automatically translates manga / comic pages from **English → Thai** (configurable) through a 5-stage computer-vision + LLM pipeline. Its core idea: translation is done by a **VLM (vision-language model)** that receives the full page image alongside the OCR'd text, so it can use the surrounding art, panel layout, and visual context to translate more accurately — not just the raw text in isolation. The pipeline detects speech bubbles, reads the text, sends both the text and the page image to the LLM for context-aware translation, erases the original text, and renders the translation back onto the image.
+A FastAPI service that automatically translates manga / comic pages from **English(or any that llm support) → Thai** (configurable) through a 5-stage computer-vision + LLM pipeline. Its core idea: translation is done by a **VLM (vision-language model)** that receives the full page image alongside the OCR'd text, so it can use the surrounding art, panel layout, and visual context to translate more accurately — not just the raw text in isolation. The pipeline detects speech bubbles, reads the text, sends both the text and the page image to the LLM for context-aware translation, erases the original text, and renders the translation back onto the image.
 
 ---
 
