@@ -1,6 +1,6 @@
 # MangaTVL
 
-A FastAPI service that automatically translates manga / comic pages from **English → Thai** (configurable) through a 5-stage computer-vision + LLM pipeline. It detects speech bubbles, reads the text, translates it with an LLM, erases the original text, and renders the translation back onto the image.
+A FastAPI service that automatically translates manga / comic pages from **English → Thai** (configurable) through a 5-stage computer-vision + LLM pipeline. Its core idea: translation is done by a **VLM (vision-language model)** that receives the full page image alongside the OCR'd text, so it can use the surrounding art, panel layout, and visual context to translate more accurately — not just the raw text in isolation. The pipeline detects speech bubbles, reads the text, sends both the text and the page image to the LLM for context-aware translation, erases the original text, and renders the translation back onto the image.
 
 ---
 
@@ -19,7 +19,8 @@ Input image
   │              EasyOCR (default) / manga-ocr (Japanese) / PaddleOCR
   │              chosen per source language (per-bubble crop + polygon clean)
   ▼
-[3] Translation  send the whole page's text to an LLM at once  → TranslationResult[]
+[3] Translation  send the whole page's text + the page image   → TranslationResult[]
+  │              to a VLM at once for context-aware translation
   │              OpenRouter / Gemini / Groq (async, JSON output)
   ▼
 [4] Inpainting ─ erase the original text from the image        → cleaned image
@@ -37,7 +38,7 @@ The stages communicate through Pydantic models in [`manga_translator/schemas/int
 |-------|------|-----------|
 | Detection | ONNX Runtime / ultralytics YOLO | [`detection/`](manga_translator/detection/) |
 | OCR | EasyOCR / manga-ocr (Japanese) / PaddleOCR | [`ocr/`](manga_translator/ocr/) |
-| Translation | OpenRouter / Gemini / Groq (async) | [`translators/`](manga_translator/translators/) |
+| Translation | OpenRouter / Gemini / Groq VLM (async, text + image) | [`translators/`](manga_translator/translators/) |
 | Inpainting | OpenCV / Simple-LaMa | [`inpainting/`](manga_translator/inpainting/) |
 | Rendering | Pillow + language-aware line-breaking (pythainlp / per-char / spaces) | [`rendering/renderer.py`](manga_translator/rendering/renderer.py) |
 | Serving | FastAPI | [`main.py`](main.py) |
@@ -273,8 +274,7 @@ MangaTVL/
 │   ├── schemas/interface.py    # DetectionResult / OCRResult / TranslationResult
 │   ├── utils/common.py         # image + geometry helpers
 │   └── assets/                 # fonts, models, sample images
-├── tests/                      # pytest suite (pure-logic unit tests)
-└── report.md                   # design / risk reference (Thai)
+└── tests/                      # pytest suite (pure-logic unit tests)
 ```
 
 ---
@@ -294,4 +294,3 @@ The suite covers pure logic only (geometry helpers, LLM-response parsing, `text_
 
 - Detection model weights (`*.onnx` / `*.pt`) are gitignored and must be supplied separately.
 - Translation failures fall back to the original text per bubble rather than dropping the whole page.
-- `report.md` is maintained in Thai.
