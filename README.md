@@ -274,7 +274,6 @@ MangaTVL/
 │   ├── utils/common.py         # image + geometry helpers
 │   └── assets/                 # fonts, models, sample images
 ├── tests/                      # pytest suite (pure-logic unit tests)
-├── CHANGELOG.md                # change log (Thai)
 └── report.md                   # design / risk reference (Thai)
 ```
 
@@ -295,4 +294,4 @@ The suite covers pure logic only (geometry helpers, LLM-response parsing, `text_
 
 - Detection model weights (`*.onnx` / `*.pt`) are gitignored and must be supplied separately.
 - Translation failures fall back to the original text per bubble rather than dropping the whole page.
-- `CHANGELOG.md` and `report.md` are maintained in Thai.
+- `report.md` is maintained in Thai.
