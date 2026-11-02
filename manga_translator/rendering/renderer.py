@@ -94,7 +94,9 @@ class TextRenderer:
     def render(self, image, inputs: list[TranslationResult], lang=None, font=None, text_scale=None, *,
                original=None, glyph_masks: list[np.ndarray] | None = None, keep_words=()) -> Image.Image:
         """Letter ``inputs`` onto ``image`` (the cleaned page; PIL or BGR array)."""
-        self.last_layout = [{"font_size": None, "drawn": False} for _ in (inputs or [])]
+        # local list, published at the end: the companion letters several pages at once on threads
+        layout = [{"font_size": None, "drawn": False} for _ in (inputs or [])]
+        self.last_layout = layout
         if not inputs:
             return cv2pil(image) if isinstance(image, np.ndarray) else image
         lang = lang or self.lang
@@ -188,8 +190,9 @@ class TextRenderer:
             ok = isinstance(drawn, np.ndarray)
             if ok:
                 occupied |= drawn
-            self.last_layout[i] = {"font_size": limit if ok else None, "fit": f, "cap": c,
-                                   "drawn": ok, "bold": ok and face != fp}
+            layout[i] = {"font_size": limit if ok else None, "fit": f, "cap": c,
+                         "drawn": ok, "bold": ok and face != fp}
+        self.last_layout = layout
         return out.convert("RGB")
 
     @staticmethod

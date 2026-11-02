@@ -139,3 +139,15 @@ def test_long_glossary_term_does_not_shrink_the_balloon():
     assert kept[0] == free[0]                                                    # the long term may break
     short = layout("ชิโอริกลับบ้านไปซะที", "thai", area, (120, 200), font, 40, keep_words=["ชิโอริ"])
     assert any("ชิโอริ" in line for line in short[1])                           # a name still stays whole
+
+
+def test_one_renderer_letters_pages_on_several_threads():
+    from concurrent.futures import ThreadPoolExecutor
+    one = ellipse_poly(300, 250, 170, 110)
+    many = [ellipse_poly(150 + 150 * k, 250, 60, 50) for k in range(3)]
+    r = TextRenderer()
+    jobs = [(page_with_balloon(one), [item("สวัสดีครับ", one)])] * 4
+    jobs += [(page_with_balloon(many[0]), [item("ไป", p) for p in many])] * 4
+    with ThreadPoolExecutor(8) as ex:  # the companion letters pages while others are being analysed
+        outs = list(ex.map(lambda j: r.render(j[0], j[1], lang="thai"), jobs))
+    assert len(outs) == 8

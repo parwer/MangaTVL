@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import threading
 
 import cv2
 import freetype
@@ -63,9 +64,14 @@ class ShapedFont:
         return canvas, base
 
 
-@functools.lru_cache(maxsize=256)
-def get_font(path: str, size: int) -> ShapedFont:
+@functools.lru_cache(maxsize=1024)
+def _font(path: str, size: int, thread: int) -> ShapedFont:
     return ShapedFont(path, size)
+
+
+def get_font(path: str, size: int) -> ShapedFont:
+    """A cached font for this thread (a FreeType face renders into one shared glyph slot)."""
+    return _font(path, size, threading.get_ident())
 
 
 def stroke_mask(fill: np.ndarray, radius: float) -> np.ndarray:
