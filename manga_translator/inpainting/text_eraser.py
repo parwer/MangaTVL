@@ -37,8 +37,8 @@ class TextEraser:
         return refine_mask(clean, self.masker.predict(clean), thresh=0.4) & zone
 
     def erase(self, bgr: np.ndarray, masks: list[np.ndarray], dets: list[DetectionResult],
-              keep: list[int] | None = None) -> EraseResult:
-        """Erase the regions in ``keep``, repair, and revert regions whose text survives."""
+              keep: list[int] | None = None, fast: bool = False) -> EraseResult:
+        """Erase the regions in ``keep``, repair, and revert regions whose text survives (``fast``: no LaMa)."""
         keep = list(range(len(masks))) if keep is None else list(keep)
         masks = [m.copy() for m in masks]
         H, W = bgr.shape[:2]
@@ -57,7 +57,7 @@ class TextEraser:
                     self.inpainter.stats["flat"] += 1
                     continue
             hole |= rm
-        clean = self.inpainter.erase(pre, hole)
+        clean = self.inpainter.erase(pre, hole, fast=fast)
 
         # repair / guard zone per region: a 41 px halo, clipped to the balloon (+7 px) if any
         zone = np.zeros((H, W), np.uint8)
@@ -82,7 +82,7 @@ class TextEraser:
             for i in keep:  # the renderer must also avoid the newly found ink
                 add = left & cv2.dilate(masks[i], np.ones((41, 41), np.uint8))
                 masks[i] |= add & lims[i] if i in lims else add
-            res.clean = self.inpainter.erase(res.clean, cv2.dilate(left, np.ones((5, 5), np.uint8)))
+            res.clean = self.inpainter.erase(res.clean, cv2.dilate(left, np.ones((5, 5), np.uint8)), fast=fast)
         if not self.guard:
             return res
 

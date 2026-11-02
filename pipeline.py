@@ -248,6 +248,7 @@ class PageState:
     rendered: Optional[Image.Image] = None
     timings: dict = field(default_factory=dict)
     glyph: object = None  # text mask (ndarray) between analyze_gpu and analyze_cpu
+    fast: bool = False  # fast quality: no foreign-text filter, Telea instead of LaMa
 
     def lap(self, name, start):
         import time
@@ -280,11 +281,11 @@ class QualityPipeline(Pipeline):
         self.lock_glossary = lock_glossary  # one spelling per name across the chapter
         self.last_page: dict = {}  # diagnostics of the last page (timings, regions, reverted)
 
-    def analyze(self, image: Image.Image, from_lang=None) -> "PageState":
+    def analyze(self, image: Image.Image, from_lang=None, fast=False) -> "PageState":
         """Detect, mask, repair regions, OCR and build per-region glyph masks."""
-        return self.analyze_cpu(self.analyze_gpu(image, from_lang), from_lang)
+        return self.analyze_cpu(self.analyze_gpu(image, from_lang, fast), from_lang)
 
-    def analyze_gpu(self, image: Image.Image, from_lang=None) -> "PageState":
+    def analyze_gpu(self, image: Image.Image, from_lang=None, fast=False) -> "PageState":
         """The GPU half of analyze: detect, text mask, region repair and the main OCR."""
         import time
         import cv2
@@ -293,7 +294,7 @@ class QualityPipeline(Pipeline):
         from manga_translator.ocr.region_ocr import first_reads
         from manga_translator.utils.common import pil2cv
 
-        page = PageState(image=image.convert("RGB"))
+        page = PageState(image=image.convert("RGB"), fast=fast)
         t = time.perf_counter()
         bgr = pil2cv(page.image)
         dets = self.det_model.detect(page.image)
@@ -319,8 +320,9 @@ class QualityPipeline(Pipeline):
 
         t = time.perf_counter()
         second = self._second_reader(from_lang)
-        page.ocr = finish_reads(page.ocr, page.image, reread=second)
-        if second is not None and getattr(self, "foreign_filter", False):
+        page.ocr = finish_reads(page.ocr, page.image, reread=second)  # few crops: kept in fast mode too
+        # the filter reads every free-text region (most of analyze's time): fast leaves kana SFX to the LLM
+        if second is not None and getattr(self, "foreign_filter", False) and not page.fast:
             page.ocr = drop_foreign_text(page.ocr, page.image, second)
         page.masks = region_glyph_masks(pil2cv(page.image), page.glyph, page.ocr) if page.ocr else []
         page.glyph = None
@@ -350,7 +352,8 @@ class QualityPipeline(Pipeline):
             provider = provider or self.provider
             translator = self._get_translator(provider, self._resolve_key(provider, api_key))
         t = time.perf_counter()
-        results, chapter["context"] = await ContextTranslator(translator, keep_nontext=self.keep_nontext,
+        # fast: no foreign-text filter, so the LLM itself may leave kana SFX / logos alone
+        results, chapter["context"] = await ContextTranslator(translator, keep_nontext=self.keep_nontext or page.fast,
                                                        lock_glossary=getattr(self, "lock_glossary", False)).translate(
             page.ocr, page.image, context=chapter.get("context"), model=model, from_lang=from_lang,
             to_lang=to_lang, custom_instruction=custom_instruction, capture=capture)
@@ -369,7 +372,8 @@ class QualityPipeline(Pipeline):
 
         t = time.perf_counter()
         keep = [i for i, r in enumerate(results) if (r.translated_text or "").strip()]
-        erased = self.eraser.erase(pil2cv(page.image), page.masks, [o.detection_result for o in page.ocr], keep)
+        erased = self.eraser.erase(pil2cv(page.image), page.masks, [o.detection_result for o in page.ocr], keep,
+                                   fast=page.fast)
         for i, _ in erased.reverted:  # text survived erasing: original pixels are back, don't letter
             results[i].translated_text = ""
         page.lap("inpaint", t)

@@ -176,6 +176,7 @@ class AnalyzeReq(BaseModel):
     image: str
     from_lang: str = "auto"
     to_lang: str = "thai"
+    quality: str = "best"  # best | fast (no foreign-text filter, Telea instead of LaMa)
 
 
 class JobReq(BaseModel):
@@ -206,9 +207,9 @@ def _expire():
         JOBS.pop(jid, None)
 
 
-async def _analyze(image: str, from_lang: str, to_lang: str) -> dict:
+async def _analyze(image: str, from_lang: str, to_lang: str, quality: str = "best") -> dict:
     src = None if from_lang == "auto" else from_lang
-    page = await GPU.run(ANALYZE, pipe().analyze_gpu, decode(image), src)
+    page = await GPU.run(ANALYZE, pipe().analyze_gpu, decode(image), src, quality == "fast")
     # second OCR reading is CPU only: off the GPU queue so the next page's detection runs meanwhile
     page = await asyncio.to_thread(pipe().analyze_cpu, page, src)
     _expire()
@@ -260,7 +261,7 @@ async def _translate_job(job: dict, llm: LLM, context: dict | None) -> dict:
 @app.post("/v1/analyze")
 async def analyze(req: AnalyzeReq):
     """Detect, mask and OCR a page; returns a job id for /v1/job."""
-    return await _analyze(req.image, req.from_lang, req.to_lang)
+    return await _analyze(req.image, req.from_lang, req.to_lang, req.quality)
 
 
 @app.post("/v1/job")
@@ -286,7 +287,7 @@ async def result(jid: str):
 @app.post("/v1/translate")
 async def translate(req: TranslateReq):
     """One page in one call (analyze + job + result)."""
-    a = await _analyze(req.image, req.from_lang, req.to_lang)
+    a = await _analyze(req.image, req.from_lang, req.to_lang, req.quality)
     job = JOBS[a["job"]]
     if not a["regions"]:
         JOBS.pop(a["job"], None)

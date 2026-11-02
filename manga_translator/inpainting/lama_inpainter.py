@@ -43,8 +43,8 @@ class LamaInpainter(InpainterBase):
         return cv2pil(self.erase(pil2cv(image), mask))
 
     # ------------------------------------------------------------ glyph-mask erase
-    def erase(self, bgr: np.ndarray, mask: np.ndarray) -> np.ndarray:
-        """Erase ``mask`` (255 = erase) from a BGR image: flat fill or LaMa per cluster."""
+    def erase(self, bgr: np.ndarray, mask: np.ndarray, fast: bool = False) -> np.ndarray:
+        """Erase ``mask`` (255 = erase) from a BGR image: flat fill or LaMa (``fast``: Telea) per cluster."""
         out = bgr.copy()
         if not mask.any():
             return out
@@ -69,10 +69,11 @@ class LamaInpainter(InpainterBase):
                     continue
             mg = int(max(64, 0.6 * max(w, h)))  # context margin ~ cluster size
             x1, y1, x2, y2 = max(0, x - mg), max(0, y - mg), min(W, x + w + mg), min(H, y + h + mg)
-            res = self.lama(out[y1:y2, x1:x2], cm[y1:y2, x1:x2])
-            sub = cm[y1:y2, x1:x2] > 0
+            crop, cmask = out[y1:y2, x1:x2], cm[y1:y2, x1:x2]
+            res = cv2.inpaint(crop, cmask, 3, cv2.INPAINT_TELEA) if fast else self.lama(crop, cmask)
+            sub = cmask > 0
             out[y1:y2, x1:x2][sub] = res[sub]
-            self.stats["lama"] += 1
+            self.stats["telea" if fast else "lama"] = self.stats.get("telea" if fast else "lama", 0) + 1
         return out
 
     def lama(self, bgr: np.ndarray, mask: np.ndarray) -> np.ndarray:

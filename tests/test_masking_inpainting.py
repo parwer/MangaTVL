@@ -81,6 +81,16 @@ def test_busy_surround_goes_to_lama_and_only_the_hole_changes():
     assert (out[mask > 0] == 7).all() and (out[mask == 0] == img[mask == 0]).all()
 
 
+def test_fast_erase_uses_telea_instead_of_lama():
+    rng = np.random.default_rng(0)
+    img = rng.integers(0, 255, (100, 100, 3), dtype=np.uint8)
+    mask = np.zeros((100, 100), np.uint8); mask[40:60, 40:60] = 255
+    inp = bare_inpainter(lama=lambda bgr, mask: (_ for _ in ()).throw(AssertionError("LaMa in fast mode")))
+    out = inp.erase(img, mask, fast=True)
+    assert inp.stats["telea"] == 1 and inp.stats["lama"] == 0
+    assert (out[mask == 0] == img[mask == 0]).all() and not (out[mask > 0] == img[mask > 0]).all()
+
+
 # ---------------------------------------------------------------- masks
 def test_refine_mask_grows_to_cover_edges():
     prob = np.zeros((60, 60), np.float32); prob[20:40, 28:32] = 0.9

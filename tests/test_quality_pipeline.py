@@ -8,7 +8,7 @@ from PIL import Image
 from manga_translator.detection.refine import complete_free_text, missed_blocks, orphan_glyphs, straddling_blocks
 from manga_translator.inpainting.text_eraser import EraseResult
 from manga_translator.ocr.region_ocr import read_regions
-from manga_translator.schemas.interface import DetectionResult, OCRResult
+from manga_translator.schemas.interface import DetectionResult, OCRResult, TranslationResult
 from manga_translator.translators.translator import AsyncTranslatorBase
 from pipeline import QualityPipeline
 
@@ -118,7 +118,7 @@ def stub_pipeline(llm):
     qp._get_ocr = lambda lang: Stub(get_ocr=lambda im, dets: [OCRResult(text="HELLO", boxes=[], detection_result=d) for d in dets])
     qp._get_translator = lambda provider, key: llm
     qp._resolve_key = lambda provider, key: None
-    qp.eraser = Stub(erase=lambda bgr, masks, dets, keep: EraseResult(np.full_like(bgr, 255), masks))
+    qp.eraser = Stub(erase=lambda bgr, masks, dets, keep, fast=False: EraseResult(np.full_like(bgr, 255), masks))
     rendered = []
     qp.renderer = Stub(render=lambda clean, results, **kw: rendered.append([r.translated_text for r in results]) or Image.new("RGB", (300, 200)))
     qp.provider, qp.to_lang, qp.device = "fake", "thai", "cpu"
@@ -158,7 +158,7 @@ def test_each_batch_starts_a_new_chapter(tmp_path):
 def test_reverted_region_is_not_lettered(tmp_path):
     llm = FakeLLM()
     qp, rendered = stub_pipeline(llm)
-    qp.eraser = Stub(erase=lambda bgr, masks, dets, keep: EraseResult(bgr.copy(), masks, reverted=[(0, 500)]))
+    qp.eraser = Stub(erase=lambda bgr, masks, dets, keep, fast=False: EraseResult(bgr.copy(), masks, reverted=[(0, 500)]))
     asyncio.run(qp.run_batch([page(tmp_path / "a.png")], show_progress=False))
     assert rendered == [[""]] and qp.last_page["reverted"] == [(0, 500)]
 
@@ -191,3 +191,18 @@ def test_foreign_reader_reading_is_kept_as_alt():
              for t in ("DEE? eRenz", "WATER")]
     out = drop_foreign_text(items, img, lambda crop: "DEEP BREATH")
     assert out[0].alt_text == "DEEP BREATH"
+
+
+def test_fast_page_skips_the_foreign_filter_and_lama(tmp_path, monkeypatch):
+    import manga_translator.ocr.region_ocr as R
+    qp, _ = stub_pipeline(FakeLLM())
+    qp.foreign_filter = True
+    filtered, erased = [], []
+    monkeypatch.setattr(R, "drop_foreign_text", lambda ocr, image, reader: filtered.append(1) or ocr)
+    qp._second_reader = lambda lang: (lambda crop: "")
+    qp.eraser = Stub(erase=lambda bgr, masks, dets, keep, fast=False: erased.append(fast) or EraseResult(bgr, masks))
+    img = Image.open(page(tmp_path / "p.png"))
+    best, fast = qp.analyze(img), qp.analyze(img, fast=True)
+    assert filtered == [1] and fast.fast and not best.fast and fast.ocr[0].text == "HELLO"
+    qp.erase(fast, [TranslationResult(ocr_result=o, translated_text="x") for o in fast.ocr])
+    assert erased == [True]

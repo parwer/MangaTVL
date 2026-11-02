@@ -70,6 +70,11 @@ def region_line(n: int, o: OCRResult) -> str:
     return f"[{n}] {o.text}"
 
 
+def _is_keep(x: dict) -> bool:
+    """The model marks a non-text region with "keep": true, or sometimes writes "keep" as its translation."""
+    return x.get("keep") in (True, "true", "True") or str(x.get("translation") or "").strip(" []()").lower() == "keep"
+
+
 class ContextTranslator:
     def __init__(self, translator: AsyncTranslatorBase, *, max_side: int = 1280, jpeg_quality: int = 88,
                  keep_nontext: bool = False, lock_glossary: bool = False):
@@ -120,7 +125,7 @@ class ContextTranslator:
         out, suspect = [], []
         for n, o in enumerate(ocr_result):
             x = by_n.get(n, {})
-            if self.keep_nontext and x.get("keep") is True:  # not text: left unerased and unlettered
+            if self.keep_nontext and _is_keep(x):  # not text: left unerased and unlettered
                 out.append(TranslationResult(ocr_result=o, translated_text="", speaker=x.get("speaker") or "",
                                              source_text=o.text))
                 continue

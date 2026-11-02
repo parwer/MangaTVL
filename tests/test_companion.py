@@ -22,9 +22,10 @@ class StubPipe:
     def __init__(self, texts):
         self.texts, self.finished = texts, []
 
-    def analyze_gpu(self, image, from_lang=None):
+    def analyze_gpu(self, image, from_lang=None, fast=False):
         det = DetectionResult(bbox=[0, 0, 10, 10], form_type="bubble")
-        return PageState(image=image, ocr=[OCRResult(text=t, boxes=[], detection_result=det) for t in self.texts])
+        return PageState(image=image, ocr=[OCRResult(text=t, boxes=[], detection_result=det) for t in self.texts],
+                         fast=fast)
 
     def analyze_cpu(self, page, from_lang=None):
         return page
@@ -115,3 +116,10 @@ def test_gpu_queue_letters_before_analysing():
         await asyncio.gather(first, *rest)
     asyncio.run(main())
     assert order == ["a0", "r0", "a1", "a2"]
+
+
+def test_fast_quality_reaches_the_page(monkeypatch):
+    c, stub = client(monkeypatch, ["HELLO"])
+    for q, fast in (("fast", True), ("best", False)):
+        a = c.post("/v1/analyze", json={"image": data_url(), "quality": q}, headers=EXT).json()
+        assert srv.JOBS[a["job"]]["page"].fast is fast

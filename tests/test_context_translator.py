@@ -184,3 +184,10 @@ def test_second_ocr_reading_is_shown_and_counts_as_own_text():
 def test_sfx_rule_in_prompt():
     from manga_translator.translators.utils.prompt import get_context_sys_prompt
     assert "SHUT / SLAM -> ปัง!" in get_context_sys_prompt("{}")
+
+
+def test_keep_written_as_the_translation_is_kept_not_lettered():
+    reply = {"regions": [{"n": 0, "source": "HELLO THERE", "translation": "สวัสดี"},
+                         {"n": 1, "translation": "keep"}]}  # ch.29 logo, fast mode: lettered "keep"
+    on = asyncio.run(ContextTranslator(FakeTranslator([reply]), keep_nontext=True).translate(REGIONS, PAGE))[0]
+    assert [r.translated_text for r in on] == ["สวัสดี", ""]

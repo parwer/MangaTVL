@@ -139,7 +139,8 @@ async function analyzePage({ src, dataUrl, pageUrl }) {
   const backend = await findBackend(s);
   if (!backend) return { error: "no-backend" };
   if (backend.kind !== "companion" || !backend.info.jobs) return { error: "old-backend" };
-  return call(backend, "/v1/analyze", { image: await pageImage(src, dataUrl, pageUrl), from_lang: s.fromLang, to_lang: s.toLang });
+  return call(backend, "/v1/analyze", { image: await pageImage(src, dataUrl, pageUrl), from_lang: s.fromLang, to_lang: s.toLang,
+    quality: s.quality });
 }
 
 async function translateJob({ job, context }) {
