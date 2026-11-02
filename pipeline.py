@@ -256,7 +256,8 @@ class QualityPipeline(Pipeline):
     """Glyph-level pipeline with chapter context; same API as Pipeline."""
 
     def __init__(self, *, free_text_model="default", masker=None, inpainter=None, lama_onnx=None,
-                 device: str = "cpu", keep_nontext: bool = False, foreign_filter: bool = True, **kw):
+                 device: str = "cpu", keep_nontext: bool = False, foreign_filter: bool = True,
+                 lock_glossary: bool = True, **kw):
         from manga_translator.detection.hybrid_detection import DEFAULT_FREE_TEXT_MODEL
         from manga_translator.inpainting import LamaInpainter, TextEraser
         from manga_translator.masking import TextMasker
@@ -270,6 +271,7 @@ class QualityPipeline(Pipeline):
         self.keep_nontext = keep_nontext  # experimental: logos / kana SFX left untouched
         self.foreign_filter = foreign_filter  # Japanese SFX / logos in non-CJK sources left untouched
         self._foreign_reader = None
+        self.lock_glossary = lock_glossary  # one spelling per name across the chapter
         self.last_page: dict = {}  # diagnostics of the last page (timings, regions, reverted)
 
     def analyze(self, image: Image.Image, from_lang=None) -> "PageState":
@@ -324,7 +326,8 @@ class QualityPipeline(Pipeline):
             provider = provider or self.provider
             translator = self._get_translator(provider, self._resolve_key(provider, api_key))
         t = time.perf_counter()
-        results, chapter["context"] = await ContextTranslator(translator, keep_nontext=self.keep_nontext).translate(
+        results, chapter["context"] = await ContextTranslator(translator, keep_nontext=self.keep_nontext,
+                                                       lock_glossary=getattr(self, "lock_glossary", False)).translate(
             page.ocr, page.image, context=chapter.get("context"), model=model, from_lang=from_lang,
             to_lang=to_lang, custom_instruction=custom_instruction, capture=capture)
         page.lap("translate", t)

@@ -93,7 +93,7 @@ Story context: {context}
 Already translated on this page:
 {page}
 
-Translate ONLY these (text is exact, do not swap):
+Translate ONLY these (text is exact, do not swap; use the glossary spellings exactly):
 {ask}
 Return JSON {{"regions":[{{"n":0,"translation":"..."}}]}}"""
 
@@ -105,9 +105,17 @@ KEEP_NONTEXT_RULE = """- a tag on something that is NOT {from_lang} text -- untr
 """
 
 
+GLOSSARY_RULE = """- glossary: put every character, place and term name on this page in "glossary" with its exact
+  {to_lang} spelling (names too, not only in "characters"). Spellings already in the glossary are fixed:
+  use them exactly, never change them.
+"""
+
+
 def get_context_sys_prompt(context: str, from_lang="English", to_lang="Thai", custom_instruction=None,
-                           keep_nontext=False):
+                           keep_nontext=False, lock_glossary=False):
     extra = KEEP_NONTEXT_RULE.format(from_lang=from_lang) if keep_nontext else ""
+    if lock_glossary:
+        extra += GLOSSARY_RULE.format(to_lang=to_lang)
     if custom_instruction:
         extra += ("- additional user instruction (highest priority, override the above if they conflict): "
                  f"{custom_instruction}\n")

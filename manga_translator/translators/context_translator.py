@@ -12,6 +12,27 @@ from .utils.prompt import CONTEXT_REASK_PROMPT, get_context_sys_prompt
 from .utils.set_of_mark import mark_image
 
 
+def merge_context(old: dict, new: dict) -> dict:
+    """Chapter context across pages: glossary spellings are kept (first wins), the rest updates."""
+    out = dict(old or {})
+    out.update({k: v for k, v in (new or {}).items() if v and k not in ("characters", "glossary")})
+    out["characters"] = {**(old or {}).get("characters", {}), **(new or {}).get("characters", {})}
+    out["glossary"] = {**(new or {}).get("glossary", {}), **(old or {}).get("glossary", {})}
+    return out
+
+
+def glossary_misses(source: str, translation: str, glossary: dict) -> list[str]:
+    """Glossary terms that occur in ``source`` but whose spelling is missing from ``translation``."""
+    miss = []
+    for term, spelling in (glossary or {}).items():
+        target = str(spelling).split(" (")[0].strip()  # "ยาคิวเคน (เกม...)" -> "ยาคิวเคน"
+        if len(term) < 3 or not target:
+            continue
+        if re.search(rf"(?<![A-Za-z]){re.escape(term)}(?![A-Za-z])", source or "", re.I) and target not in (translation or ""):
+            miss.append(term)
+    return miss
+
+
 def _norm(t: str) -> str:
     return re.sub(r"[^a-z0-9぀-ヿ一-鿿]+", "", (t or "").lower())
 
@@ -26,8 +47,9 @@ def same_text(ocr: str, source: str, thr: float = 0.45) -> bool:
 
 class ContextTranslator:
     def __init__(self, translator: AsyncTranslatorBase, *, max_side: int = 1280, jpeg_quality: int = 88,
-                 keep_nontext: bool = False):
+                 keep_nontext: bool = False, lock_glossary: bool = False):
         self.translator = translator
+        self.lock_glossary = lock_glossary  # names keep one spelling across the chapter
         self.keep_nontext = keep_nontext  # experimental: let the model skip logos / kana SFX / art
         self.max_side = max_side
         self.jpeg_quality = jpeg_quality
@@ -50,7 +72,7 @@ class ContextTranslator:
         src, dst = from_lang or tr.from_lang, to_lang or tr.to_lang
         marked = mark_image(image, [o.detection_result.bbox for o in ocr_result], self.max_side)
         system = get_context_sys_prompt(json.dumps(context, ensure_ascii=False), src, dst, custom_instruction,
-                                        keep_nontext=self.keep_nontext)
+                                        keep_nontext=self.keep_nontext, lock_glossary=self.lock_glossary)
         inputs = "OCR per region:\n" + "\n".join(f"[{n}] {o.text}" for n, o in enumerate(ocr_result))
         if capture is not None:
             capture.update(model=model, system_prompt=system, user_input=inputs, image_attached=True)
@@ -83,6 +105,12 @@ class ContextTranslator:
             if raw and (not x or not same_text(o.text, source)):
                 suspect.append(n)
         new_context = data.get("context") or context
+        if self.lock_glossary:
+            new_context = merge_context(context, data.get("context") or {})
+            gloss = new_context.get("glossary", {})
+            suspect += [n for n, r in enumerate(out) if n not in suspect and r.translated_text
+                        and r.translated_text != r.ocr_result.text
+                        and glossary_misses(f"{r.source_text or ''} {r.ocr_result.text}", r.translated_text, gloss)]
         if suspect:
             fixed = await self._reask(out, suspect, model, src, dst, new_context)
             for n, t in fixed.items():

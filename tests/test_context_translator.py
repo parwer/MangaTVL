@@ -117,3 +117,34 @@ def test_keep_nontext_is_off_by_default_and_skips_marked_regions_when_on():
     on = asyncio.run(ContextTranslator(fake, keep_nontext=True).translate(REGIONS, PAGE))[0]
     assert [r.translated_text for r in on] == ["สวัสดี", ""]
     assert '"keep": true' in fake.calls[0]["system"] and len(fake.calls) == 1
+
+
+def test_merge_context_keeps_first_glossary_spelling_and_updates_the_rest():
+    from manga_translator.translators.context_translator import merge_context
+    old = {"glossary": {"Aina": "ไออินะ"}, "characters": {"Iori": "polite"}, "story": "a"}
+    new = {"glossary": {"Aina": "ไอน่า", "Chisa": "ชิสะ"}, "characters": {"Iori": "rude with friends"}, "story": "b"}
+    m = merge_context(old, new)
+    assert m["glossary"] == {"Aina": "ไออินะ", "Chisa": "ชิสะ"}
+    assert m["characters"] == {"Iori": "rude with friends"} and m["story"] == "b"
+
+
+def test_glossary_misses():
+    from manga_translator.translators.context_translator import glossary_misses
+    g = {"Aina": "ไออินะ", "Yakyuken": "ยาคิวเคน (เกม)", "Io": "ไอโอ"}
+    assert glossary_misses("CALM DOWN, AINA!", "ใจเย็นนะไอน่า", g) == ["Aina"]
+    assert glossary_misses("CALM DOWN, AINA!", "ใจเย็นนะไออินะ", g) == []
+    assert glossary_misses("YAKYUKEN TIME", "ได้เวลายาคิวเคนแล้ว", g) == []
+    assert glossary_misses("AINAMI", "x", g) == []           # whole words only; short terms ignored
+
+
+def test_lock_glossary_reasks_a_line_with_the_wrong_spelling():
+    ctx = {"glossary": {"Iori": "อิโอริ"}}
+    fake = FakeTranslator([{"regions": [{"n": 0, "source": "HELLO THERE", "translation": "หวัดดี"},
+                                        {"n": 1, "source": "WHO ARE YOU?", "translation": "นายคือใคร"}],
+                            "context": {"glossary": {"Iori": "อีโอริ"}}},
+                           {"regions": [{"n": 0, "translation": "หวัดดี อิโอริ"}]}])
+    regions = [ocr("HELLO THERE, IORI", [10, 10, 120, 60]), REGIONS[1]]
+    out, new_ctx = asyncio.run(ContextTranslator(fake, lock_glossary=True).translate(regions, PAGE, context=ctx))
+    assert new_ctx["glossary"]["Iori"] == "อิโอริ"            # the first spelling stays
+    assert out[0].translated_text == "หวัดดี อิโอริ" and len(fake.calls) == 2
+    assert "glossary spellings exactly" in fake.calls[1]["inputs"]
