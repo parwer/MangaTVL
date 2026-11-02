@@ -14,7 +14,11 @@
   const fab = document.createElement("div");
   fab.className = "mtvl-fab";
   fab.innerHTML = `<button class="mtvl-go" title="Translate pages">แปล</button><button class="mtvl-undo" title="Revert">↺</button><span class="mtvl-msg"></span>`;
+  fab.hidden = true; // shown only on sites switched on in the popup
   document.documentElement.appendChild(fab);
+  const showFab = (sites) => { fab.hidden = !(sites || {})[location.hostname] && !on; };
+  chrome.storage.local.get("sites").then((v) => showFab(v.sites));
+  chrome.storage.onChanged.addListener((ch) => { if (ch.sites) showFab(ch.sites.newValue); });
   const go = fab.querySelector(".mtvl-go");
   const msg = (t) => (fab.querySelector(".mtvl-msg").textContent = t || "");
   const send = (m) => chrome.runtime.sendMessage(m).catch((e) => ({ error: String(e) }));
@@ -162,7 +166,7 @@
 
   async function start() {
     mode = (await send({ type: "settings" })).contextMode || "chapter";
-    on = true; failed = 0; go.textContent = "หยุด";
+    on = true; failed = 0; go.textContent = "หยุด"; fab.hidden = false;
     observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] });
     document.addEventListener("load", onLoad, true);
     scan(); progress();
@@ -170,6 +174,7 @@
 
   function stop() {
     on = false; go.textContent = "แปล";
+    chrome.storage.local.get("sites").then((v) => showFab(v.sites));
     observer.disconnect();
     document.removeEventListener("load", onLoad, true);
     progress();

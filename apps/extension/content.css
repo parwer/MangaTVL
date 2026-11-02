@@ -7,3 +7,4 @@
 .mtvl-msg:empty { display: none; }
 .mtvl-badge { position: absolute; z-index: 2147483645; color: #fff; padding: 3px 8px; border-radius: 6px;
   font: 600 12px/1.4 system-ui, sans-serif; pointer-events: none; }
+.mtvl-fab[hidden] { display: none !important; }

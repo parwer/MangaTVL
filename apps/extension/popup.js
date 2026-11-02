@@ -29,3 +29,23 @@ $("save").onclick = async () => {
 $("toLang").onchange = () => chrome.storage.local.set({ toLang: $("toLang").value });
 $("contextMode").onchange = () => chrome.storage.local.set({ contextMode: $("contextMode").value });
 refresh();
+
+// the floating button shows only on sites switched on here (the right-click menu works everywhere)
+async function siteButton() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  let host = "";
+  try { host = new URL(tab.url).hostname; } catch (_) {}
+  const btn = $("site");
+  if (!host) { btn.hidden = true; return; }
+  const { sites = {} } = await chrome.storage.local.get("sites");
+  const on = !!sites[host];
+  btn.textContent = on ? `✓ เปิดใช้บน ${host} (กดเพื่อปิด)` : `เปิดใช้บน ${host}`;
+  btn.className = on ? "on" : "ghost";
+  btn.onclick = async () => {
+    const { sites = {} } = await chrome.storage.local.get("sites");
+    if (on) delete sites[host]; else sites[host] = true;
+    await chrome.storage.local.set({ sites });
+    siteButton();
+  };
+}
+siteButton();
