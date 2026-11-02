@@ -123,6 +123,7 @@ def stub_pipeline(llm):
     qp.renderer = Stub(render=lambda clean, results, **kw: rendered.append([r.translated_text for r in results]) or Image.new("RGB", (300, 200)))
     qp.provider, qp.to_lang, qp.device = "fake", "thai", "cpu"
     qp.keep_nontext = False
+    qp.foreign_filter = False
     return qp, rendered
 
 
@@ -159,3 +160,13 @@ def test_reverted_region_is_not_lettered(tmp_path):
     qp.eraser = Stub(erase=lambda bgr, masks, dets, keep: EraseResult(bgr.copy(), masks, reverted=[(0, 500)]))
     asyncio.run(qp.run_batch([page(tmp_path / "a.png")], show_progress=False))
     assert rendered == [[""]] and qp.last_page["reverted"] == [(0, 500)]
+
+
+def test_free_text_read_as_japanese_is_dropped():
+    from manga_translator.ocr.region_ocr import drop_foreign_text
+    img = Image.new("RGB", (100, 50), "white")
+    items = [OCRResult(text=t, boxes=[], detection_result=DetectionResult(bbox=[0, 0, 10, 10], form_type=f))
+             for t, f in (("Huh? 3", "free_text"), ("WATER", "free_text"), ("HELLO", "bubble"))]
+    reads = iter(["どうやってるわ", "WATER"])
+    out = drop_foreign_text(items, img, lambda crop: next(reads))
+    assert [o.text for o in out] == ["WATER", "HELLO"]     # balloons are never checked

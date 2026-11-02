@@ -51,3 +51,21 @@ def read_regions(engine, image: Image.Image, dets: list[DetectionResult], core: 
         ocr = engine.get_ocr(image, dets)
     return [o for o in ocr if o is not None and o.text.strip()
             and (o.detection_result.form_type != "free_text" or sum(ch.isalpha() for ch in o.text) >= 2)]
+
+
+def _cjk_count(text: str) -> int:
+    return sum(1 for ch in text if "぀" <= ch <= "ヿ" or "一" <= ch <= "鿿" or "ｦ" <= ch <= "ﾟ")
+
+
+def drop_foreign_text(ocr: list[OCRResult], image: Image.Image, reader, min_cjk: int = 2) -> list[OCRResult]:
+    """Drop free text that ``reader`` (a Japanese-capable crop OCR) reads as kana / kanji."""
+    # untranslated Japanese SFX and logos: an English OCR reads them as garbage letters, the LLM then
+    # "fixes" that into a word and the art gets erased and lettered over (ch.29: どぶ, ギラ, the logo)
+    out = []
+    for o in ocr:
+        if o.detection_result.form_type == "free_text":
+            x1, y1, x2, y2 = o.detection_result.bbox
+            if _cjk_count(reader(image.crop((x1, y1, x2, y2)))) >= min_cjk:
+                continue
+        out.append(o)
+    return out

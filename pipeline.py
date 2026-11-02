@@ -256,7 +256,7 @@ class QualityPipeline(Pipeline):
     """Glyph-level pipeline with chapter context; same API as Pipeline."""
 
     def __init__(self, *, free_text_model="default", masker=None, inpainter=None, lama_onnx=None,
-                 device: str = "cpu", keep_nontext: bool = False, **kw):
+                 device: str = "cpu", keep_nontext: bool = False, foreign_filter: bool = True, **kw):
         from manga_translator.detection.hybrid_detection import DEFAULT_FREE_TEXT_MODEL
         from manga_translator.inpainting import LamaInpainter, TextEraser
         from manga_translator.masking import TextMasker
@@ -268,6 +268,8 @@ class QualityPipeline(Pipeline):
         self.masker = masker or TextMasker(device=device)
         self.eraser = TextEraser(self.masker, self.inpainter)
         self.keep_nontext = keep_nontext  # experimental: logos / kana SFX left untouched
+        self.foreign_filter = foreign_filter  # Japanese SFX / logos in non-CJK sources left untouched
+        self._foreign_reader = None
         self.last_page: dict = {}  # diagnostics of the last page (timings, regions, reverted)
 
     def analyze(self, image: Image.Image, from_lang=None) -> "PageState":
@@ -276,7 +278,7 @@ class QualityPipeline(Pipeline):
         import cv2
         from manga_translator.detection.refine import refine_regions
         from manga_translator.masking import refine_mask, region_glyph_masks
-        from manga_translator.ocr.region_ocr import read_regions
+        from manga_translator.ocr.region_ocr import drop_foreign_text, read_regions
         from manga_translator.utils.common import pil2cv
 
         page = PageState(image=image.convert("RGB"))
@@ -292,9 +294,23 @@ class QualityPipeline(Pipeline):
         page.lap("textmask", t)
         t = time.perf_counter()
         page.ocr = read_regions(self._get_ocr(from_lang), page.image, dets, core)
+        reader = self._foreign_text_reader(from_lang)
+        if reader is not None:
+            page.ocr = drop_foreign_text(page.ocr, page.image, reader)
         page.masks = region_glyph_masks(bgr, glyph, page.ocr) if page.ocr else []
         page.lap("ocr", t)
         return page
+
+    def _foreign_text_reader(self, from_lang):
+        """Baberu OCR for the foreign-script check, or None (off, CJK source, or no model files)."""
+        from manga_translator.ocr.baberu_engine import MODEL_DIR, BaberuOCR
+        from manga_translator.utils.lang import canonical_name
+        cjk = {"japanese", "chinese", "chinese_traditional", "korean"}
+        if not getattr(self, "foreign_filter", False) or canonical_name(from_lang or self.from_lang) in cjk:
+            return None
+        if self._foreign_reader is None and (MODEL_DIR / "onnx").exists():
+            self._foreign_reader = BaberuOCR()
+        return self._foreign_reader
 
     async def translate_page(self, page: "PageState", translator=None, *, chapter: dict | None = None,
                              provider=None, api_key=None, model=None, from_lang=None, to_lang=None,
