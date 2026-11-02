@@ -124,6 +124,7 @@ def stub_pipeline(llm):
     qp.provider, qp.to_lang, qp.device = "fake", "thai", "cpu"
     qp.keep_nontext = False
     qp.foreign_filter = False
+    qp._second_reader = lambda lang: None
     return qp, rendered
 
 
@@ -170,3 +171,23 @@ def test_free_text_read_as_japanese_is_dropped():
     reads = iter(["どうやってるわ", "WATER"])
     out = drop_foreign_text(items, img, lambda crop: next(reads))
     assert [o.text for o in out] == ["WATER", "HELLO"]     # balloons are never checked
+
+
+
+def test_letterless_read_is_retried_with_the_second_reader():
+    class Fixed:
+        def get_ocr(self, image, dets):
+            return [OCRResult(text=t, boxes=[], detection_result=d) for t, d in zip(["0", "1", "???", "HEY"], dets)]
+    dets = [DetectionResult(bbox=[i * 20, 0, i * 20 + 10, 10], form_type="bubble") for i in range(4)]
+    reads = iter(["READY~", "ぐらんぶる", "？？？"])
+    out = read_regions(Fixed(), Image.new("RGB", (100, 20), "white"), dets, reread=lambda crop: next(reads))
+    assert [o.text for o in out] == ["READY~", "1", "???", "HEY"]   # vertical text fixed; kana / no letters kept as read
+
+
+def test_foreign_reader_reading_is_kept_as_alt():
+    from manga_translator.ocr.region_ocr import drop_foreign_text
+    img = Image.new("RGB", (100, 50), "white")
+    items = [OCRResult(text=t, boxes=[], detection_result=DetectionResult(bbox=[0, 0, 10, 10], form_type="free_text"))
+             for t in ("DEE? eRenz", "WATER")]
+    out = drop_foreign_text(items, img, lambda crop: "DEEP BREATH")
+    assert out[0].alt_text == "DEEP BREATH"

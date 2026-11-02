@@ -30,8 +30,9 @@ def grow_to_glyphs(regions: list[DetectionResult], glyph: np.ndarray, share: flo
     return cv2.dilate(out, np.ones((3, 3), np.uint8))
 
 
-def read_regions(engine, image: Image.Image, dets: list[DetectionResult], core: np.ndarray | None = None) -> list[OCRResult]:
-    """OCR all detections, hiding overlapping free text from the balloons."""
+def read_regions(engine, image: Image.Image, dets: list[DetectionResult], core: np.ndarray | None = None,
+                 reread=None) -> list[OCRResult]:
+    """OCR all detections, hiding overlapping free text from the balloons; ``reread`` retries letterless reads."""
     if not dets:
         return []
     hide = [d for d in dets if d.form_type == "free_text"
@@ -49,8 +50,24 @@ def read_regions(engine, image: Image.Image, dets: list[DetectionResult], core: 
                     ocr[i] = r
     else:
         ocr = engine.get_ocr(image, dets)
+    if reread is not None:
+        # vertical / stacked lettering: a line OCR reads READY~ as "0", YEAAHH! as "1" (ch.29)
+        for o in ocr:
+            if o is not None and _letters(o.text) < 2:
+                x1, y1, x2, y2 = o.detection_result.bbox
+                read = (reread(image.crop((x1, y1, x2, y2))) or "").strip()
+                if sum(ch.isascii() and ch.isalpha() for ch in read) >= 2:  # Latin only: kana stays foreign
+                    o.text = read
     return [o for o in ocr if o is not None and o.text.strip()
-            and (o.detection_result.form_type != "free_text" or sum(ch.isalpha() for ch in o.text) >= 2)]
+            and (o.detection_result.form_type != "free_text" or _letters(o.text) >= 2)]
+
+
+def _letters(text: str) -> int:
+    return sum(ch.isalpha() for ch in text or "")
+
+
+def _norm(text: str) -> str:
+    return "".join(ch for ch in (text or "").lower() if ch.isalnum())
 
 
 def _cjk_count(text: str) -> int:
@@ -58,14 +75,18 @@ def _cjk_count(text: str) -> int:
 
 
 def drop_foreign_text(ocr: list[OCRResult], image: Image.Image, reader, min_cjk: int = 2) -> list[OCRResult]:
-    """Drop free text that ``reader`` (a Japanese-capable crop OCR) reads as kana / kanji."""
+    """Drop free text that ``reader`` (a Japanese-capable crop OCR) reads as kana / kanji; keep its other readings."""
     # untranslated Japanese SFX and logos: an English OCR reads them as garbage letters, the LLM then
     # "fixes" that into a word and the art gets erased and lettered over (ch.29: どぶ, ギラ, the logo)
     out = []
     for o in ocr:
         if o.detection_result.form_type == "free_text":
             x1, y1, x2, y2 = o.detection_result.bbox
-            if _cjk_count(reader(image.crop((x1, y1, x2, y2)))) >= min_cjk:
+            read = (reader(image.crop((x1, y1, x2, y2))) or "").strip()
+            if _cjk_count(read) >= min_cjk:
                 continue
+            # stylized SFX: this reader often gets letters the main OCR garbles ("DEE? eRenz" / DEEP BREATH)
+            if not o.alt_text and _norm(read) != _norm(o.text):
+                o.alt_text = read if _letters(read) >= 2 else ""
         out.append(o)
     return out

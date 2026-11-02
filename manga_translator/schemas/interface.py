@@ -12,6 +12,7 @@ class OCRResult(BaseModel):
     text: str
     boxes: list[list[int]] # each group of text that got from ocr [[x1, y1, x2, y2], ...]
     detection_result: DetectionResult
+    alt_text: str = ""  # a second OCR reading (free text: Baberu), shown to the translator
 
     def __post_init__(self):
         self.boxes = self._parse_bbox(self.boxes, "bbox")

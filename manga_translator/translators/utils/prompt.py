@@ -76,7 +76,12 @@ For each region decide:
 - the right register for {to_lang}. For Thai: choose pronouns (ผม/ฉัน/เรา/ข้า/กู/แก/นาย/เธอ...) and
   sentence-final particles (ครับ/ค่ะ/คะ/นะ/จ้ะ/วะ/เว้ย/สิ/เถอะ...) that fit the speaker's gender,
   age, relationship and emotion. Never mix ครับ and ค่ะ for the same speaker.
-- sound effects / shouts: translate as natural {to_lang} onomatopoeia, keep it short.
+- sound effects / shouts: translate as natural {to_lang} onomatopoeia, keep it short. A sound effect
+  is the sound or motion, not the dictionary word: a door SHUT / SLAM -> ปัง!, CLAP -> แปะ!, GRAB -> หมับ,
+  a sigh / BREATH -> (ถอนหายใจ). Keep the original's emphasis (!, repeated letters).
+  Only words that ARE sounds get this; a label or sign (WATER, EXIT) is translated as a word.
+- each tag gets only the text inside its own region, never a neighbouring sound effect or line.
+- some regions have a 2nd OCR reading; either may be wrong, trust the image.
 - keep each translation about as long as the original so it fits the balloon; break nothing.
 - names: keep the glossary spelling if given.
 {extra}

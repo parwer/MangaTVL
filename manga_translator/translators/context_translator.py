@@ -62,6 +62,14 @@ def same_text(ocr: str, source: str, thr: float = 0.45) -> bool:
     return SequenceMatcher(None, a, b).ratio() >= thr
 
 
+def region_line(n: int, o: OCRResult) -> str:
+    """One OCR input line; a second reading is added when it differs."""
+    alt = (o.alt_text or "").strip()
+    if _norm(alt) and _norm(alt) != _norm(o.text):
+        return f"[{n}] {o.text}  (2nd OCR: {alt})"
+    return f"[{n}] {o.text}"
+
+
 class ContextTranslator:
     def __init__(self, translator: AsyncTranslatorBase, *, max_side: int = 1280, jpeg_quality: int = 88,
                  keep_nontext: bool = False, lock_glossary: bool = False):
@@ -90,7 +98,7 @@ class ContextTranslator:
         marked = mark_image(image, [o.detection_result.bbox for o in ocr_result], self.max_side)
         system = get_context_sys_prompt(json.dumps(context, ensure_ascii=False), src, dst, custom_instruction,
                                         keep_nontext=self.keep_nontext, lock_glossary=self.lock_glossary)
-        inputs = "OCR per region:\n" + "\n".join(f"[{n}] {o.text}" for n, o in enumerate(ocr_result))
+        inputs = "OCR per region:\n" + "\n".join(region_line(n, o) for n, o in enumerate(ocr_result))
         if capture is not None:
             capture.update(model=model, system_prompt=system, user_input=inputs, image_attached=True)
         try:
@@ -121,7 +129,8 @@ class ContextTranslator:
                                          speaker=x.get("speaker") or "", source_text=source))
             # re-ask only a real swap (the source is another region's text): a source that differs
             # from garbage OCR is the model reading the image correctly (ch.29: "DEE? eRenz" -> BREATH)
-            if raw and (not x or is_swap(n, source, [r.text for r in ocr_result])):
+            if raw and (not x or (is_swap(n, source, [r.text for r in ocr_result])
+                                  and not (_norm(o.alt_text) and same_text(o.alt_text, source, 0.6)))):
                 suspect.append(n)
         new_context = data.get("context") or context
         respell = []

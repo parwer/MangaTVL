@@ -165,3 +165,22 @@ def test_short_words_sharing_letters_are_not_a_swap():
     ocr_texts = ["DEE? eRenz", "REALLY?", "ON ONe CONDITION:"]
     assert not is_swap(0, "BREATH", ocr_texts)               # shares letters with REALLY? by chance
     assert is_swap(0, "ON ONE CONDITION.", ocr_texts)        # really another region's text
+
+
+def test_second_ocr_reading_is_shown_and_counts_as_own_text():
+    from manga_translator.translators.context_translator import region_line
+    a = ocr("REALLy", [10, 10, 120, 60])
+    a.alt_text = "DEEP BREATH"
+    b = ocr("DEEP BREATH!", [200, 10, 300, 60])
+    assert region_line(0, a) == "[0] REALLy  (2nd OCR: DEEP BREATH)"
+    assert region_line(1, b) == "[1] DEEP BREATH!"                   # no 2nd reading
+    fake = FakeTranslator([{"regions": [{"n": 0, "source": "DEEP BREATH", "translation": "(สูดหายใจ)"},
+                                        {"n": 1, "source": "DEEP BREATH!", "translation": "สูดหายใจ!"}]}])
+    out, _ = asyncio.run(ContextTranslator(fake).translate([a, b], PAGE))
+    assert "(2nd OCR: DEEP BREATH)" in fake.calls[0]["inputs"]
+    assert len(fake.calls) == 1 and out[0].translated_text == "(สูดหายใจ)"   # the 2nd reading backs it: no re-ask
+
+
+def test_sfx_rule_in_prompt():
+    from manga_translator.translators.utils.prompt import get_context_sys_prompt
+    assert "SHUT / SLAM -> ปัง!" in get_context_sys_prompt("{}")
