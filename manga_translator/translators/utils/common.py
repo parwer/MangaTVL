@@ -24,6 +24,17 @@ def parse_response(content, debug=False):
                 print("JSON parsing failed:", exc)
             return None
 
+    def try_parse_first_json(text):
+        # The model wrote a complete JSON value and then more ("Extra data": a stray "}",
+        # a second object, a note) -> keep the first complete value.
+        starts = [i for i in (text.find("{"), text.find("[")) if i >= 0]
+        if not starts:
+            return None
+        try:
+            return json.JSONDecoder().raw_decode(text[min(starts):])[0]
+        except json.JSONDecodeError:
+            return None
+
     if debug:
         print("Raw response text:\n", content)
 
@@ -45,6 +56,9 @@ def parse_response(content, debug=False):
         if parsed is not None:
             break
         parsed = try_parse_json(candidate)
+        if parsed is not None:
+            break
+        parsed = try_parse_first_json(candidate)
         if parsed is not None:
             break
 

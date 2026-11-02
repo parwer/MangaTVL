@@ -175,12 +175,14 @@ class OpenAICompatibleTranslator(AsyncTranslatorBase):
     """Shared implementation for any OpenAI-compatible chat client (OpenRouter,
     Groq, ...) that exposes ``client.chat.completions.create``."""
 
-    async def _translate(self, inputs: str, image=None, *, model=None, system_prompt=None, capture=None):
+    async def _translate(self, inputs: str, image=None, *, model=None, system_prompt=None, capture=None,
+                         image_detail: str = "low"):
         if image is not None:
             # Image must be a multimodal content part, not a raw data-URI string
             # in `content` (that gets tokenized as text -> ~2k-4k tokens/image).
+            # ContextTranslator asks for "high": its numbered tags must be legible.
             user_content = [
-                {"type": "image_url", "image_url": {"url": image, "detail": "low"}},
+                {"type": "image_url", "image_url": {"url": image, "detail": image_detail}},
                 {"type": "text", "text": inputs},
             ]
         else:

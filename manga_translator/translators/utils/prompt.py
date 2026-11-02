@@ -65,3 +65,42 @@ def get_sys_prompt(user_prompt=None, guidelines=None, from_lang="English", to_la
 
 def get_ocr_prompt(data: str):
     return OCR_INPUT_PROMPT.format(data=data)
+
+# --- page-level, context-aware translation (ContextTranslator) -------------------------------
+CONTEXT_SYSTEM_PROMPT = """You are a professional manga/comic localizer translating {from_lang} into {to_lang}.
+You receive the page image. Every text region is marked with a red numbered tag [n],
+and you also get the OCR text for each n (OCR may contain mistakes - fix them from the image).
+
+For each region decide:
+- who speaks (use the art: tail direction, panel, face) and their gender/age/attitude,
+- the right register for {to_lang}. For Thai: choose pronouns (ผม/ฉัน/เรา/ข้า/กู/แก/นาย/เธอ...) and
+  sentence-final particles (ครับ/ค่ะ/คะ/นะ/จ้ะ/วะ/เว้ย/สิ/เถอะ...) that fit the speaker's gender,
+  age, relationship and emotion. Never mix ครับ and ค่ะ for the same speaker.
+- sound effects / shouts: translate as natural {to_lang} onomatopoeia, keep it short.
+- keep each translation about as long as the original so it fits the balloon; break nothing.
+- names: keep the glossary spelling if given.
+{extra}
+Story context from previous pages (may be empty):
+{context}
+
+Return ONLY JSON:
+{{"regions":[{{"n":0,"source":"corrected source text","speaker":"name or role","translation":"..."}}],
+ "context":{{"characters":{{"Name":"gender, voice/register notes"}},"glossary":{{"src term":"{to_lang} term"}},"story":"<=2 sentences so far"}}}}
+"""
+
+CONTEXT_REASK_PROMPT = """Translate these {from_lang} manga lines into {to_lang}. Keep the same characters' voices/particles as the already-translated lines on this page.
+Story context: {context}
+Already translated on this page:
+{page}
+
+Translate ONLY these (text is exact, do not swap):
+{ask}
+Return JSON {{"regions":[{{"n":0,"translation":"..."}}]}}"""
+
+
+def get_context_sys_prompt(context: str, from_lang="English", to_lang="Thai", custom_instruction=None):
+    extra = ""
+    if custom_instruction:
+        extra = ("- additional user instruction (highest priority, override the above if they conflict): "
+                 f"{custom_instruction}\n")
+    return CONTEXT_SYSTEM_PROMPT.format(from_lang=from_lang, to_lang=to_lang, context=context, extra=extra)

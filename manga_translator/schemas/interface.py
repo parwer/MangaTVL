@@ -28,3 +28,6 @@ class OCRResult(BaseModel):
 class TranslationResult(BaseModel):
     ocr_result: OCRResult
     translated_text: str
+    # Filled by ContextTranslator only (empty / None from the plain translators):
+    speaker: str = ""                 # who says it, as named by the model
+    source_text: str | None = None    # source text corrected from the image (OCR repair)
