@@ -3,7 +3,6 @@ import cv2
 import numpy as np
 from PIL import Image
 from ..utils.common import pil2cv, cv2pil
-import matplotlib.pyplot as plt
 from ..schemas.interface import OCRResult, TranslationResult
 
 class OpenCVInpainter(InpainterBase):

@@ -1,0 +1,3 @@
+# model files are downloaded / copied here, never committed
+*
+!.gitignore

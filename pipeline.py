@@ -1,26 +1,22 @@
 import asyncio
 import os
+from dataclasses import dataclass, field
 from typing import List, Optional
 
 from dotenv import load_dotenv
 from PIL import Image
 from tqdm.asyncio import tqdm_asyncio
 
-from google import genai
 from openai import AsyncOpenAI
-from groq import AsyncGroq
 
 from manga_translator.utils.common import cv2pil, load_image
 from manga_translator.utils.lang import ocr_lang_code, ocr_engine_name
 from manga_translator.detection import build_detector
-from manga_translator.ocr.easyocr_engine import EasyOCREngine
-from manga_translator.ocr.mangaocr_engine import MangaOCREngine
 from manga_translator.inpainting.opencv_inpainter import OpenCVInpainter
 from manga_translator.rendering.renderer import TextRenderer
 from manga_translator.rendering.upscale import upscale_image
 from manga_translator.schemas.interface import OCRResult, TranslationResult
 from manga_translator.translators.groq import AsyncGroqTranslator
-from manga_translator.translators.gemini import AsyncGeminiTranslator
 from manga_translator.translators.openrouter import AsyncOpenRouterTranslator
 
 load_dotenv()
@@ -68,7 +64,9 @@ class Pipeline:
         # provider/key can be chosen per request. Build the default one now to
         # validate config at startup and keep `self.translator` for convenience.
         self._translators = {}
-        self.translator = self._get_translator(provider, self._resolve_key(provider, None))
+        # (the companion app has no server key: callers pass one per request)
+        key = self._resolve_key(provider, None)
+        self.translator = self._get_translator(provider, key) if key else None
 
         # Warm the OCR engine for the default source language (also keeps the
         # `self.ocr_engine` attribute for backward compatibility).
@@ -81,16 +79,27 @@ class Pipeline:
 
         lang = from_lang or self.from_lang
         engine = ocr_engine_name(lang)
+        # torch-free install (no easyocr / manga-ocr): the onnxruntime engines
         if engine == "mangaocr":
             cache_key = ("mangaocr", "ja")  # manga-ocr is Japanese-only (no per-language code)
             if cache_key not in self._ocr_engines:
-                self._ocr_engines[cache_key] = MangaOCREngine(device=self.device)
+                try:
+                    from manga_translator.ocr.mangaocr_engine import MangaOCREngine
+                    self._ocr_engines[cache_key] = MangaOCREngine(device=self.device)
+                except ImportError:
+                    from manga_translator.ocr.baberu_engine import BaberuOCREngine
+                    self._ocr_engines[cache_key] = BaberuOCREngine()
             return self._ocr_engines[cache_key]
 
         code = ocr_lang_code(lang, engine="easyocr")
         cache_key = ("easyocr", code)
         if cache_key not in self._ocr_engines:
-            self._ocr_engines[cache_key] = EasyOCREngine(language=code, device=self.device)
+            try:
+                from manga_translator.ocr.easyocr_engine import EasyOCREngine
+                self._ocr_engines[cache_key] = EasyOCREngine(language=code, device=self.device)
+            except ImportError:
+                from manga_translator.ocr.rapidocr_engine import RapidOCREngine
+                self._ocr_engines[cache_key] = RapidOCREngine(language=code, device=self.device)
         return self._ocr_engines[cache_key]
 
     _ENV_KEY = {
@@ -122,9 +131,12 @@ class Pipeline:
             client = AsyncOpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
             return AsyncOpenRouterTranslator(client=client, **kwargs)
         if provider == "gemini":
+            from google import genai
+            from manga_translator.translators.gemini import AsyncGeminiTranslator
             client = genai.Client(api_key=api_key)
             return AsyncGeminiTranslator(client=client, **kwargs)
         if provider == "groq":
+            from groq import AsyncGroq
             client = AsyncGroq(api_key=api_key)
             return AsyncGroqTranslator(client=client, **kwargs)
         raise ValueError(f"Unsupported provider: {provider}")
@@ -219,6 +231,27 @@ class Pipeline:
         return cv2pil(image.resize(new_size))
 
 
+@dataclass
+class PageState:
+    """One page moving through QualityPipeline (analyze -> translate_page -> finish)."""
+    image: Image.Image
+    ocr: list = field(default_factory=list)
+    masks: list = field(default_factory=list)
+    results: list = field(default_factory=list)
+    reverted: list = field(default_factory=list)
+    clean: Optional[Image.Image] = None
+    rendered: Optional[Image.Image] = None
+    timings: dict = field(default_factory=dict)
+
+    def lap(self, name, start):
+        import time
+        self.timings[name] = round(time.perf_counter() - start, 3)
+
+    def diagnostics(self) -> dict:
+        return {"timings": self.timings, "ocr": self.ocr, "results": self.results, "reverted": self.reverted,
+                "clean": self.clean, "rendered": self.rendered}
+
+
 class QualityPipeline(Pipeline):
     """Glyph-level pipeline with chapter context; same API as Pipeline."""
 
@@ -236,57 +269,83 @@ class QualityPipeline(Pipeline):
         self.eraser = TextEraser(self.masker, self.inpainter)
         self.last_page: dict = {}  # diagnostics of the last page (timings, regions, reverted)
 
-    async def _run_on_image(self, image: Image.Image, process_image: bool = False, *,
-                            provider=None, api_key=None, model=None, from_lang=None, to_lang=None,
-                            font=None, text_scale=None, upscale=None, upscaler=None,
-                            custom_instruction=None, chapter: dict | None = None) -> Image.Image:
+    def analyze(self, image: Image.Image, from_lang=None) -> "PageState":
+        """Detect, mask, repair regions, OCR and build per-region glyph masks."""
         import time
         import cv2
         from manga_translator.detection.refine import refine_regions
         from manga_translator.masking import refine_mask, region_glyph_masks
         from manga_translator.ocr.region_ocr import read_regions
-        from manga_translator.translators.context_translator import ContextTranslator
         from manga_translator.utils.common import pil2cv
 
-        chapter = chapter if chapter is not None else {}
-        tm, t = {}, time.perf_counter()
-
-        def lap(name):
-            nonlocal t
-            tm[name] = round(time.perf_counter() - t, 3)
-            t = time.perf_counter()
-
-        image = image.convert("RGB")
-        bgr = pil2cv(image)
-        dets = self.det_model.detect(image)
-        lap("detect")
+        page = PageState(image=image.convert("RGB"))
+        t = time.perf_counter()
+        bgr = pil2cv(page.image)
+        dets = self.det_model.detect(page.image)
+        page.lap("detect", t)
+        t = time.perf_counter()
         prob = self.masker.predict(bgr)
         glyph = refine_mask(bgr, prob)
         core = ((prob > 0.6) * 255).astype("uint8")  # confident letter pixels
         dets = refine_regions(dets, self.masker.blocks, glyph, core, cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY))
-        lap("textmask")
-        ocr = read_regions(self._get_ocr(from_lang), image, dets, core)
-        lap("ocr")
-        self.last_page = {"timings": tm, "regions": len(ocr), "reverted": []}
-        if not ocr:
-            return image
-        masks = region_glyph_masks(bgr, glyph, ocr)
+        page.lap("textmask", t)
+        t = time.perf_counter()
+        page.ocr = read_regions(self._get_ocr(from_lang), page.image, dets, core)
+        page.masks = region_glyph_masks(bgr, glyph, page.ocr) if page.ocr else []
+        page.lap("ocr", t)
+        return page
 
-        provider = provider or self.provider
-        translator = ContextTranslator(self._get_translator(provider, self._resolve_key(provider, api_key)))
-        results, chapter["context"] = await translator.translate(
-            ocr, image, context=chapter.get("context"), model=model, from_lang=from_lang, to_lang=to_lang,
-            custom_instruction=custom_instruction)
-        lap("translate")
+    async def translate_page(self, page: "PageState", translator=None, *, chapter: dict | None = None,
+                             provider=None, api_key=None, model=None, from_lang=None, to_lang=None,
+                             custom_instruction=None, capture: dict | None = None) -> list[TranslationResult]:
+        """Translate a page's regions; ``chapter["context"]`` is read and updated."""
+        import time
+        from manga_translator.translators.context_translator import ContextTranslator
+
+        chapter = chapter if chapter is not None else {}
+        if translator is None:
+            provider = provider or self.provider
+            translator = self._get_translator(provider, self._resolve_key(provider, api_key))
+        t = time.perf_counter()
+        results, chapter["context"] = await ContextTranslator(translator).translate(
+            page.ocr, page.image, context=chapter.get("context"), model=model, from_lang=from_lang,
+            to_lang=to_lang, custom_instruction=custom_instruction, capture=capture)
+        page.lap("translate", t)
+        return results
+
+    def finish(self, page: "PageState", results: list[TranslationResult], to_lang=None, font=None,
+               text_scale=None) -> Image.Image:
+        """Erase the translated regions (with guard) and letter them."""
+        import time
+        from manga_translator.utils.common import pil2cv
+
+        t = time.perf_counter()
         keep = [i for i, r in enumerate(results) if (r.translated_text or "").strip()]
-        erased = self.eraser.erase(bgr, masks, [o.detection_result for o in ocr], keep)
+        erased = self.eraser.erase(pil2cv(page.image), page.masks, [o.detection_result for o in page.ocr], keep)
         for i, _ in erased.reverted:  # text survived erasing: original pixels are back, don't letter
             results[i].translated_text = ""
-        lap("inpaint")
+        page.lap("inpaint", t)
+        t = time.perf_counter()
         rendered = self.renderer.render(erased.clean, results, lang=to_lang or self.to_lang, font=font,
-                                        text_scale=text_scale, original=image, glyph_masks=erased.masks)
-        lap("render")
-        self.last_page.update(reverted=erased.reverted, results=results)
+                                        text_scale=text_scale, original=page.image, glyph_masks=erased.masks)
+        page.lap("render", t)
+        page.results, page.reverted, page.clean, page.rendered = results, erased.reverted, cv2pil(erased.clean), rendered
+        return rendered
+
+    async def _run_on_image(self, image: Image.Image, process_image: bool = False, *,
+                            provider=None, api_key=None, model=None, from_lang=None, to_lang=None,
+                            font=None, text_scale=None, upscale=None, upscaler=None,
+                            custom_instruction=None, chapter: dict | None = None,
+                            capture: dict | None = None) -> Image.Image:
+        page = self.analyze(image, from_lang)
+        self.last_page = page.diagnostics()
+        if not page.ocr:
+            return page.image
+        results = await self.translate_page(page, chapter=chapter, provider=provider, api_key=api_key, model=model,
+                                            from_lang=from_lang, to_lang=to_lang,
+                                            custom_instruction=custom_instruction, capture=capture)
+        rendered = self.finish(page, results, to_lang=to_lang, font=font, text_scale=text_scale)
+        self.last_page = page.diagnostics()
         return upscale_image(rendered, factor=upscale or 1.0, method=upscaler or "lanczos", device=self.device)
 
     async def run(self, image_path, process_image: bool = False, *, chapter: dict | None = None, **kw):
