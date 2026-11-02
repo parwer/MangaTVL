@@ -34,6 +34,11 @@ openai==2.38.0                      # OpenRouter (OpenAI-compatible)
 groq==1.2.0
 google-genai==2.6.0
 
+# --- optional: glyph-mask model (masking.TextMasker) on CUDA via torch instead of onnxruntime ---
+# pip install onnx onnx2torch
+# Model files (not in git) go in manga_translator/assets/models/: comictextdetector.pt.onnx (CTD),
+# lama_ft2.pt or lama_large_512px.ckpt (LaMa), optional lama_ft2_512.onnx for onnxruntime.
+
 # --- optional: PaddleOCR alternative (not used by the default pipeline) ---
 # pip install paddlepaddle==3.3.1 paddleocr==3.5.0
 
