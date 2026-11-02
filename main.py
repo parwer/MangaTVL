@@ -28,8 +28,11 @@ DEVICE = os.getenv("DEVICE", "cpu")
 PROVIDER = os.getenv("PROVIDER", "openrouter")
 MODEL = os.getenv("MODEL", "google/gemini-3-flash-preview")
 
+# FREE_TEXT_MODEL=default (or a path) adds free-text detection next to the balloon model.
+FREE_TEXT_MODEL = os.getenv("FREE_TEXT_MODEL") or None
+
 pipe = Pipeline(provider=PROVIDER, model=MODEL, device=DEVICE,
-                user_prompt=user_prompt)
+                user_prompt=user_prompt, free_text_model=FREE_TEXT_MODEL)
 
 
 class TranslateRequest(BaseModel):

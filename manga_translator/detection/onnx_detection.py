@@ -1,216 +1,131 @@
-import onnxruntime as ort
-import numpy as np
-from PIL import Image   
-import cv2
+"""YOLO-seg detection on onnxruntime only (no torch / ultralytics), e.g. for a packaged app.
 
-from ..utils.common import pil2cv, xywh2xyxy
+Reproduces what ``ultralytics.YOLO(<model>, task="segment")(img, conf, iou)`` returns for an
+Ultralytics segmentation export (``output0`` [1, 4+nc+32, N] + ``output1`` protos
+[1, 32, mh, mw], ``end2end=False``): letterbox (pad 114), per-class NMS, mask =
+sigmoid(coeffs @ protos) upsampled to the network input, cropped to the box, largest contour.
+Boxes match ultralytics at IoU >= 0.976 on real pages. Dynamic-shape exports get ultralytics'
+"rect" letterbox (pad to a stride multiple only), fixed-shape exports the square one.
+
+Export: ``YOLO("model.pt").export(format="onnx", dynamic=True)``.
+"""
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+import cv2
+import numpy as np
+from PIL import Image
+
+from .detector import DetectorBase
 from ..schemas.interface import DetectionResult
 
-"""
-No Longer Used - This file is a placeholder for potential future ONNX-based detection implementation.
-"""
 
-class ONNXDetection:
-    def __init__(self, model_path: str = ""):
-        self.session = ort.InferenceSession(model_path)
+_PROVIDERS = {"cuda": "CUDAExecutionProvider", "dml": "DmlExecutionProvider"}
+
+
+def _session(path, device=None):
+    """CPU unless ``device`` asks for "cuda" / "dml" (0 or "cuda:0" count as cuda) and that
+    provider is installed. Listing CUDA by default makes onnxruntime try to load the CUDA
+    libraries on every machine that has the GPU package, and log errors where they are missing."""
+    import onnxruntime as ort
+    ort.set_default_logger_severity(3)
+    want = "cuda" if device == 0 or str(device).startswith("cuda") else str(device or "cpu")
+    provs = [_PROVIDERS[want]] if want in _PROVIDERS and _PROVIDERS[want] in ort.get_available_providers() else []
+    provs.append("CPUExecutionProvider")
+    so = ort.SessionOptions()
+    if provs[0] == "DmlExecutionProvider":  # DirectML requirements
+        so.enable_mem_pattern = False
+        so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    return ort.InferenceSession(str(path), so, providers=provs)
+
+
+def letterbox(rgb: np.ndarray, size, stride: int = 32, dynamic: bool = False):
+    """Resize keeping aspect + pad with 114. Returns (canvas, ratio, top, left)."""
+    h, w = rgb.shape[:2]
+    H, W = size
+    r = min(H / h, W / w)
+    nh, nw = int(round(h * r)), int(round(w * r))
+    top, left = int(round((H - nh) / 2 - 0.1)), int(round((W - nw) / 2 - 0.1))
+    if dynamic:
+        dh, dw = ((H - nh) % stride) / 2, ((W - nw) % stride) / 2
+        top, left = int(round(dh - 0.1)), int(round(dw - 0.1))
+        H, W = nh + top + int(round(dh + 0.1)), nw + left + int(round(dw + 0.1))
+    canvas = np.full((H, W, 3), 114, np.uint8)
+    canvas[top:top + nh, left:left + nw] = cv2.resize(rgb, (nw, nh), interpolation=cv2.INTER_LINEAR)
+    return canvas, r, top, left
+
+
+def decode_segment(pred: np.ndarray, protos: np.ndarray, nc: int, conf: float, iou: float,
+                   input_hw, ratio: float, top: int, left: int, image_hw, max_det: int = 300):
+    """Decode one image of an Ultralytics seg export into
+    ``[((x1, y1, x2, y2), class_id, score, polygon or None), ...]`` in original-image pixels."""
+    p = pred.T                                        # [N, 4+nc+nm]
+    scores = p[:, 4:4 + nc]
+    cls = scores.argmax(1)
+    score = scores[np.arange(len(p)), cls]
+    keep = score > conf
+    p, cls, score = p[keep], cls[keep], score[keep]
+    if not len(p):
+        return []
+    cx, cy, bw, bh = p[:, 0], p[:, 1], p[:, 2], p[:, 3]
+    boxes = np.stack([cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2], 1)
+    off = cls[:, None].astype(np.float32) * 7680.0   # per-class NMS: classes never suppress each other
+    b = boxes + off
+    idx = cv2.dnn.NMSBoxes([[float(a), float(c), float(e - a), float(f - c)] for a, c, e, f in b],
+                           score.astype(float).tolist(), conf, iou)
+    idx = np.array(idx).reshape(-1)
+    idx = idx[np.argsort(-score[idx])][:max_det]
+    coeffs, boxes, cls, score = p[idx, 4 + nc:], boxes[idx], cls[idx], score[idx]
+    nm, mh, mw = protos.shape
+    masks = (coeffs @ protos.reshape(nm, -1)).reshape(-1, mh, mw).astype(np.float32)  # logits
+    IH, IW = input_hw
+    h, w = image_hw
+    yy, xx = np.ogrid[0:IH, 0:IW]
+    out = []
+    for m, bx, c, s in zip(masks, boxes, cls, score):
+        # as ultralytics process_mask(upsample=True) + Masks.xy: upsample the logits to the network
+        # input, threshold, crop to the box, contour there, then map the points back (thresholding
+        # at page resolution gave ~4 % smaller polygons)
+        m = cv2.resize(m, (IW, IH), interpolation=cv2.INTER_LINEAR) > 0.0
+        m &= (xx >= bx[0]) & (xx < bx[2]) & (yy >= bx[1]) & (yy < bx[3])
+        cs, _ = cv2.findContours(m.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        poly = None
+        if cs:
+            pts = max(cs, key=len).reshape(-1, 2).astype(np.float32)
+            pts[:, 0] = np.clip((pts[:, 0] - left) / ratio, 0, w)
+            pts[:, 1] = np.clip((pts[:, 1] - top) / ratio, 0, h)
+            poly = pts.tolist()
+        x1, x2 = (float(np.clip((v - left) / ratio, 0, w)) for v in (bx[0], bx[2]))
+        y1, y2 = (float(np.clip((v - top) / ratio, 0, h)) for v in (bx[1], bx[3]))
+        out.append(((x1, y1, x2, y2), int(c), float(s), poly))
+    return out
+
+
+class ONNXDetection(DetectorBase):
+    """Same ``detect()`` output as ``YoloDetection`` for an ONNX export of the same model."""
+
+    def __init__(self, model_path, cls_names=None, conf: float = 0.25, iou: float = 0.5, device=None, **_):
+        super().__init__(cls_names=cls_names)
+        self.session = _session(model_path, device)
         self.input_name = self.session.get_inputs()[0].name
-        self.input_shape = self.session.get_inputs()[0].shape
-        self.output_name = self.session.get_outputs()[0].name
-        self.input_size = (self.input_shape[2], self.input_shape[3])  # (height, width)
+        meta = self.session.get_modelmeta().custom_metadata_map
+        self.nc = len(ast.literal_eval(meta.get("names", "{0: 'bubble'}")))
+        self.size = ast.literal_eval(meta.get("imgsz", "[640, 640]"))  # [h, w]
+        self.stride = int(meta.get("stride", 32))
+        self.dynamic = any(isinstance(d, str) or d is None for d in self.session.get_inputs()[0].shape[2:])
+        self.conf, self.iou = conf, iou
 
-        self.cls_names = {0: "bubble", 1: "free_text"}
-
-    
-        print(f"ONNX model loaded from {model_path}")
-        print(f"Input shape: {self.input_size}")
-    
-    def detect(self, image: Image.Image | np.ndarray):
-        boxes, confidences = self.run_inference(image)
-        results = []
-        for box, conf in zip(boxes, confidences):
-            x1, y1, x2, y2, class_id = box
-            form_type = self.cls_names.get(int(class_id), "unknown")
-            detection = DetectionResult(bbox=[int(x1), int(y1), int(x2), int(y2)], form_type=form_type)
-            results.append(detection)
-        return results
-    
-    def run_inference(self, image: Image.Image | np.ndarray):
-        self.original_width, self.original_height = image.size if isinstance(image, Image.Image) else (image.shape[1], image.shape[0])
-        input_tensor = self.preprocess(image)
-        outputs = self.session.run([self.output_name], {self.input_name: input_tensor})
-        boxes, confidences = self.postprocess(outputs)
-        return boxes, confidences
-
-    def preprocess(self, image: Image.Image | np.ndarray):
-        image = pil2cv(image)
-        image = cv2.resize(image, self.input_size)
-        image = image.transpose(2, 0, 1)  # HWC to CHW
-        image = image.reshape(1, 3, self.input_size[0], self.input_size[1])
-        image = image.astype('float32') / 255.0  # Normalize to [0, 1]
-        return image
-
-    def postprocess(self, outputs, conf_threshold=0.6):
-        detections = outputs[0]
-        # transpose as before (model output shape dependent)
-        detections = detections.transpose()
-
-        # filter detections
-        detections_filtered = self.filter_detections(detections, conf_threshold)
-
-        # ensure detections_filtered is a numpy array
-        detections_filtered = np.array(detections_filtered)
-
-        # If there are no detections (empty array), return empty results
-        if detections_filtered.size == 0:
-            return np.empty((0, 5)), np.empty((0,))
-
-        # If a single detection was returned as 1D array, convert to 2D
-        if detections_filtered.ndim == 1:
-            detections_filtered = detections_filtered.reshape(1, -1)
-
-        rescaled_boxes, confidences = self.rescale_back(detections_filtered, self.original_width, self.original_height)
-        return rescaled_boxes, confidences
-
-    def filter_detections(self, detections, conf_threshold=0.6):
-        # detections expected shape: (N, D) where D >= 5
-        # If detections is empty-like, return empty np.array
-        if detections is None:
-            return np.array([])
-
-        detections = np.array(detections)
-        if detections.size == 0:
-            return np.array([])
-
-        # handle two common layouts:
-        #  - each detection has 5 values (cx, cy, w, h, conf_or_class)
-        #  - or more than 5 (cx, cy, w, h, class_scores...)
-        # Use robust handling and return 2D array of detections with appended class and conf if needed.
-        try:
-            # If detections is 2D and second dim equals 5
-            if detections.ndim == 2 and detections.shape[1] == 5:
-                considerable = [det for det in detections if det[4] >= conf_threshold]
-                return np.array(considerable)
-            else:
-                # More than 5 dims: infer class id and score from tail
-                A = []
-                for det in detections:
-                    # ensure det is array-like
-                    det = np.array(det)
-                    if det.size < 5:
-                        continue
-                    class_id = int(det[4:].argmax())
-                    conf_score = float(det[4:].max())
-                    new_det = np.append(det[:4], [class_id, conf_score])
-                    A.append(new_det)
-                A = np.array(A)
-                if A.size == 0:
-                    return np.array([])
-                considerable = [det for det in A if det[-1] >= conf_threshold]
-                return np.array(considerable)
-        except Exception:
-            # Fallback: return empty if something unexpected
-            return np.array([])
-
-    
-    def rescale_back(self, detections_filtered, original_width, original_height):
-        # detections_filtered assumed to be (N, 6) or (N,5) (we expect at least 5 columns)
-        detections_filtered = np.array(detections_filtered)
-        if detections_filtered.size == 0:
-            return np.empty((0, 5)), np.empty((0,))
-
-        if detections_filtered.ndim == 1:
-            detections_filtered = detections_filtered.reshape(1, -1)
-
-        # If only 5 columns (cx, cy, w, h, class_id/conf) we may need to handle arrangement
-        # Ensure there are at least 5 columns; if 5, interpret as cx,cy,w,h,class_id
-        if detections_filtered.shape[1] < 5:
-            # cannot process, return empty
-            return np.empty((0, 5)), np.empty((0,))
-
-        # Support cases where last column is conf_score or class+conf (6 cols)
-        # We'll try to extract class_id from column 4 and conf_score from last column when available
-        if detections_filtered.shape[1] >= 6:
-            cx = detections_filtered[:, 0]
-            cy = detections_filtered[:, 1]
-            w = detections_filtered[:, 2]
-            h = detections_filtered[:, 3]
-            class_id = detections_filtered[:, 4]
-            conf_score = detections_filtered[:, -1]
+    def detect(self, image: Image.Image | np.ndarray) -> list[DetectionResult]:
+        # like ultralytics: a PIL image is RGB, a numpy array is OpenCV BGR
+        if isinstance(image, Image.Image):
+            rgb = np.asarray(image.convert("RGB"))
         else:
-            # shape == 5: assume [cx, cy, w, h, class_id_or_conf]
-            cx = detections_filtered[:, 0]
-            cy = detections_filtered[:, 1]
-            w = detections_filtered[:, 2]
-            h = detections_filtered[:, 3]
-            # If the fifth column is a float (confidence), we set class_id to 0 and conf_score to that value
-            last_col = detections_filtered[:, 4]
-            # Heuristic: if values in last_col are >1 then probably class id; if <=1 then confidence
-            if np.all(last_col <= 1.0):
-                class_id = np.zeros_like(last_col)
-                conf_score = last_col
-            else:
-                class_id = last_col
-                conf_score = np.ones_like(last_col)
-
-        # Rescale from model input normalized coords to original image size
-        cx = cx / self.input_size[1] * original_width
-        cy = cy / self.input_size[0] * original_height
-        w = w / self.input_size[1] * original_width
-        h = h / self.input_size[0] * original_height
-
-        x1, y1, x2, y2 = xywh2xyxy((cx, cy, w, h))
-        # x1,y1,x2,y2 may be arrays already - stack accordingly
-        rescaled_boxes = np.column_stack((x1, y1, x2, y2, class_id))
-        keep, keep_conf = self.MNS(rescaled_boxes, conf_score)
-        return keep, keep_conf
-    
-    def MNS(self, boxes, conf_scores, iou_threshold=0.5):
-
-        # boxes [[x1, y1, x2, y2], ...]
-        x1 = boxes[:, 0]
-        y1 = boxes[:, 1]
-        x2 = boxes[:, 2]
-        y2 = boxes[:, 3]
-
-        areas = (x2 - x1) * (y2 - y1)
-        order = conf_scores.argsort()
-
-        keep = []
-        keep_conf = []
-
-        while len(order) > 0:
-            idx = order[-1]
-            A = boxes[idx]
-            conf = conf_scores[idx]
-
-            order = order[:-1]
-
-            xx1 = np.take(x1, indices=order)
-            yy1 = np.take(y1, indices=order)
-            xx2 = np.take(x2, indices=order)
-            yy2 = np.take(y2, indices=order)
-
-            keep.append(A)
-            keep_conf.append(conf)
-
-            # iou
-            xx1 = np.maximum(x1[idx], xx1)
-            yy1 = np.maximum(y1[idx], yy1)
-            xx2 = np.minimum(x2[idx], xx2)
-            yy2 = np.minimum(y2[idx], yy2)
-
-            w = np.maximum(xx2-xx1, 0)
-            h = np.maximum(yy2-yy1, 0)
-
-            intersection = w*h
-
-            # union area
-            other_areas = np.take(areas, indices=order)
-            union = areas[idx] + other_areas - intersection
-
-            iou = intersection / union
-
-            boleans = iou < iou_threshold
-            order = order[boleans]
-        
-        return np.array(keep), np.array(keep_conf)
+            rgb = cv2.cvtColor(np.asarray(image), cv2.COLOR_BGR2RGB)
+        canvas, r, top, left = letterbox(rgb, self.size, self.stride, self.dynamic)
+        x = np.ascontiguousarray(canvas.transpose(2, 0, 1)[None], dtype=np.float32) / 255.0
+        pred, protos = self.session.run(None, {self.input_name: x})
+        dets = decode_segment(pred[0], protos[0], self.nc, self.conf, self.iou, canvas.shape[:2],
+                              r, top, left, rgb.shape[:2])
+        return self.build_results([d[0] for d in dets], [d[1] for d in dets], [d[3] for d in dets])

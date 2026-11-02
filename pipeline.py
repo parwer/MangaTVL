@@ -12,7 +12,7 @@ from groq import AsyncGroq
 
 from manga_translator.utils.common import cv2pil, load_image
 from manga_translator.utils.lang import ocr_lang_code, ocr_engine_name
-from manga_translator.detection.yolo_detection import YoloDetection
+from manga_translator.detection import build_detector
 from manga_translator.ocr.easyocr_engine import EasyOCREngine
 from manga_translator.ocr.mangaocr_engine import MangaOCREngine
 from manga_translator.inpainting.opencv_inpainter import OpenCVInpainter
@@ -32,6 +32,7 @@ class Pipeline:
     def __init__(
         self,
         det_model=None,
+        free_text_model=None,  # path, or "default" (assets/models/bubble_freetext_yolo26s.pt) -> hybrid detection
         ocr_engine=None,
         provider: str = "gemini",
         model: Optional[str] = None,
@@ -45,7 +46,7 @@ class Pipeline:
         device: str = "cpu",
         font_path: Optional[str] = None,
     ):
-        self.det_model = det_model or YoloDetection(device=device)
+        self.det_model = det_model or build_detector(free_text_model=free_text_model, device=device)
         # OCR engine(s): if the caller passes one, always use it. Otherwise build an
         # EasyOCREngine per source language on demand (cached) so from_lang can vary
         # per request without reloading the model every time.
