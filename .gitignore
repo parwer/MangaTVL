@@ -236,3 +236,12 @@ eval/scraped/
 
 # MangaTVL eval outputs (generated)
 eval/results/
+
+# removed from the repo, kept locally only
+website/
+website.rar
+CHANGELOG.md
+eval/
+tests/test_judge.py
+postman_collection.json
+report.md
