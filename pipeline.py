@@ -154,7 +154,8 @@ class Pipeline:
         )
         inpainted_image = self.inpainter.inpaint(image, translation_result)
         rendered = self.renderer.render(inpainted_image, translation_result,
-                                        lang=to_lang or self.to_lang, font=font, text_scale=text_scale)
+                                        lang=to_lang or self.to_lang, font=font, text_scale=text_scale,
+                                        original=image)
         # Optional output upscaling (final step): enlarge / sharpen the returned page.
         return upscale_image(rendered, factor=upscale or 1.0,
                              method=upscaler or "lanczos", device=self.device)

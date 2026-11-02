@@ -1,6 +1,6 @@
 """Tests for rendering.fonts — font registry & per-language resolution."""
 import os
-from manga_translator.rendering.fonts import list_fonts, font_path, _registry
+from manga_translator.rendering.fonts import list_fonts, font_path, bold_font_path, _registry
 
 
 def test_list_fonts_shape():
@@ -27,7 +27,7 @@ def test_language_default_when_no_font():
     assert font_path(None, lang="japanese").endswith("YuseiMagic-Regular.ttf")
     assert font_path(None, lang="chinese").endswith("ZhiMangXing-Regular.ttf")
     assert font_path(None, lang="korean").endswith("NanumPenScript-Regular.ttf")
-    assert font_path(None, lang="thai").endswith("THSarabunNew.ttf")
+    assert font_path(None, lang="thai").endswith("Mali-Medium.ttf")
 
 
 def test_language_default_resolves_aliases():
@@ -42,4 +42,11 @@ def test_unknown_lang_falls_back_to_latin_default():
 
 def test_unknown_font_key_falls_through_to_language_default():
     # a bad font key must not crash; it falls through to the language default
-    assert font_path("no_such_font", lang="thai").endswith("THSarabunNew.ttf")
+    assert font_path("no_such_font", lang="thai").endswith("Mali-Medium.ttf")
+
+
+def test_bold_face_for_emphasis():
+    assert bold_font_path(None, lang="thai").endswith("Mali-Bold.ttf")
+    assert os.path.isfile(bold_font_path("mali"))
+    assert bold_font_path("bangers") is None          # no bold registered
+    assert bold_font_path(None, lang="english") is None

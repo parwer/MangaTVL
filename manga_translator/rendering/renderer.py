@@ -1,272 +1,238 @@
-import textwrap
-from PIL import Image, ImageDraw, ImageFont
-from pathlib import Path
+"""Page renderer: letters every translated region onto the cleaned (inpainted) page.
 
-from ..utils.common import cv2pil, inscribed_rect, inset_bbox
+Per region the writable area is the balloon's own shape (``typeset.balloon_area``) and the
+text is typeset with balanced line breaks (``typeset.render_region``). On top of that this
+module does the *page-level* planning a letterer does:
+
+* one dialogue size per page: balloons are capped near the page median, so one small balloon
+  doesn't get huge text next to normal ones; shouts / big captions keep their emphasis
+  (relative to the original lettering size) and get the bold face when the font has one;
+* free text (asides, captions) squeezed far below dialogue size may grow into free space
+  around it -- never into a balloon, onto line art or onto other text;
+* regions never letter over each other's original text or over text already drawn;
+* text stays inside its balloon's polygon.
+
+The original lettering's footprint (glyph mask) improves anchoring, colour and size
+matching. Pass ``glyph_masks`` when the pipeline has them; otherwise, when ``original`` is
+given, it is estimated from the difference between the original and the cleaned page.
+Without either, regions are anchored at their area's centre in black (white on dark).
+"""
+from __future__ import annotations
+
+from dataclasses import replace
+
+import cv2
+import numpy as np
+from PIL import Image
 
 from ..schemas.interface import TranslationResult
-from .extract_text_box import extract_text_box
-from .tokenize import tokenize, is_space_delimited
-from .fonts import font_path as resolve_font_path
-import functools
-import re
-
-DEFAULT_FONT_PATH = Path(__file__).resolve().parent.parent / "assets" / "fonts" / "THSarabunNew.ttf"
-
-ABSOLUTE_MIN_FONT_SIZE = 10
-ELLIPSIS = "…"
-# Private-use placeholder standing in for original spaces while wrapping spaceless
-# scripts (Thai/CJK), so they survive the strip-token-boundary-spaces step.
-SPACE_SENTINEL = ""
+from ..utils.common import cv2pil, pil2cv
+from .fonts import bold_font_path, font_path as resolve_font_path
+from .typeset import balloon_area, detect_style, render_region
 
 
-def _stroke_for_font(font_size):
-    return max(1, font_size // 12)
+def _poly_mask(polygon, shape, grow: int = 0) -> np.ndarray | None:
+    if not polygon or len(polygon) < 3:
+        return None
+    m = np.zeros(shape, np.uint8)
+    cv2.fillPoly(m, [np.asarray(polygon, np.int32).reshape(-1, 1, 2)], 255)
+    if grow > 0:
+        m = cv2.dilate(m, np.ones((grow, grow), np.uint8))
+    elif grow < 0:
+        m = cv2.erode(m, np.ones((-grow, -grow), np.uint8))
+    return m
 
 
-@functools.lru_cache(maxsize=128)
-def _load_font(path, size):
-    """Cached TTF loader — the fit search reloads the same (font, size) many
-    times, so caching avoids re-reading the file on every step. Falls back to
-    Pillow's default font when the path can't be loaded."""
-    try:
-        return ImageFont.truetype(path, size) if path else ImageFont.load_default()
-    except Exception:
-        print(f"Failed to load font from {path}. Using default font.")
-        return ImageFont.load_default()
+def _union_except(masks, keep, i) -> np.ndarray:
+    out = np.zeros_like(masks[i])
+    for j in keep:
+        if j != i:
+            out |= masks[j]
+    return out
+
+
+def estimate_glyph_masks(original_bgr, clean_bgr, items, thresh: int = 40) -> list[np.ndarray]:
+    """Original lettering per region ~= pixels the inpainter changed, inside the region."""
+    H, W = clean_bgr.shape[:2]
+    changed = ((cv2.absdiff(original_bgr, clean_bgr).max(2) > thresh) * 255).astype(np.uint8)
+    out = []
+    for it in items:
+        det = it.ocr_result.detection_result
+        lim = _poly_mask(det.segmentation, (H, W), grow=7)
+        if lim is None:
+            x1, y1, x2, y2 = (int(v) for v in det.bbox)
+            lim = np.zeros((H, W), np.uint8)
+            lim[max(0, y1):y2, max(0, x1):x2] = 255
+        out.append(changed & lim)
+    return out
+
+
+def _orig_size(gm, text) -> float | None:
+    """Rough original lettering size: sqrt(ink area per character)."""
+    n = len("".join((text or "").split()))
+    if gm is None or not gm.any() or n == 0:
+        return None
+    return float(np.sqrt(np.count_nonzero(gm) / n))
 
 
 class TextRenderer:
     def __init__(self,
-                 font_path=DEFAULT_FONT_PATH,
-                 tokenizer=None,   # optional override: callable(text, lang) -> list[str]; None = language-aware default
-                 max_font_size=100,
-                 min_font_size=18,
-                 lang="thai",      # default target language for line breaking (overridable per render() call)
-                 text_scale=1.2,   # inflate the fit area (LIR -> bbox) so text fills more of the bubble; >1 = bigger
-                 supersample=2,    # draw text at this scale then downscale (LANCZOS) for crisper edges; 1 = off
-                 display_mode="horizontal" # "vertical" or "horizontal" or "mixed"
+                 font_path=None,      # fallback TTF when the font registry has no match
+                 max_font_size=80,
+                 min_font_size=11,
+                 lang="thai",         # default target language (overridable per render() call)
+                 text_scale=1.0,      # >1 = allow bigger text, <1 = smaller (scales the size caps)
+                 supersample=3,       # glyphs are drawn at this scale and downscaled for smooth edges
                  ):
         self.font_path = font_path
-        self.tokenizer = tokenizer
         self.max_font_size = max_font_size
         self.min_font_size = min_font_size
         self.lang = lang
         self.text_scale = text_scale
         self.supersample = max(1, int(supersample))
-        self.display_mode = display_mode
-
-    def render(self, image, inputs: list[TranslationResult], lang=None, font=None, text_scale=None):
-        if inputs is None or len(inputs) == 0:
-            print("No inputs provided for rendering. Returning original image.")
-            return image
-
-        lang = lang or self.lang  # target language drives how lines are broken
-        # Pick the font: explicit `font` key -> per-language default -> this
-        # renderer's font_path. Resolved once per call and reused for every bubble.
-        font_path = resolve_font_path(font, lang=lang, fallback=self.font_path)
-        scale = self._clamp_text_scale(text_scale if text_scale is not None else self.text_scale)
-        ss = self.supersample
-        image_copy = cv2pil(image.copy())
-        w, h = image_copy.size
-        # `measure_draw` measures text in original coords (for the fit search);
-        # `text_draw` is where glyphs land. With supersampling the glyphs are drawn
-        # on a transparent overlay at ss× and downscaled, so artwork stays untouched
-        # and only the (anti-aliased) text gets the crisper high-res treatment.
-        measure_draw = ImageDraw.Draw(image_copy)
-        if ss > 1:
-            overlay = Image.new("RGBA", (w * ss, h * ss), (0, 0, 0, 0))
-            text_draw = ImageDraw.Draw(overlay)
-        else:
-            overlay = None
-            text_draw = measure_draw
-        # Inset by the max possible stroke so the largest font's stroke can't poke out of the bubble.
-        pad = _stroke_for_font(self.max_font_size) + 2
-
-        for item in inputs:
-            text = item.translated_text if item.translated_text else item.ocr_result.text
-            det = item.ocr_result.detection_result
-            box = self._compute_box(det, (h, w), pad, scale) or tuple(int(v) for v in extract_text_box(image_copy, item))
-            self._render_single(measure_draw, text_draw, text, box, det.bbox, lang, font_path, ss)
-
-        if overlay is not None:
-            overlay = overlay.resize((w, h), Image.LANCZOS)
-            image_copy.paste(overlay, (0, 0), overlay)
-
-        return image_copy
+        self.last_layout: list[dict] = []  # per input of the last render() call (eval / debugging)
 
     @staticmethod
     def _clamp_text_scale(value):
         try:
-            return min(2.0, max(0.5, float(value)))
+            return float(np.clip(float(value), 0.5, 2.0))
         except (TypeError, ValueError):
             return 1.0
 
-    def _compute_box(self, det, image_shape, pad, text_scale=1.0):
-        """Render area priority: polygon LIR → det.bbox inset → None (caller falls back).
-        When ``text_scale`` > 1 the LIR is grown toward the detection bbox so text
-        fills more of the bubble (the strict LIR leaves a lot of a round bubble empty)."""
-        poly = getattr(det, "segmentation", None)
-        box = None
-        if poly:
-            box = inscribed_rect(poly, image_shape, padding=pad)
-        if box is None and det.bbox:
-            box = inset_bbox(det.bbox, pad)
-        if box is None:
-            return None
-        if text_scale and text_scale != 1.0 and det.bbox:
-            box = self._inflate_box(box, det.bbox, image_shape, pad, text_scale)
-        return box
+    def render(self, image, inputs: list[TranslationResult], lang=None, font=None, text_scale=None, *,
+               original=None, glyph_masks: list[np.ndarray] | None = None) -> Image.Image:
+        """Letter ``inputs`` onto ``image`` (the cleaned page; PIL or BGR array). Returns PIL RGB.
 
-    def _inflate_box(self, box, bbox, image_shape, pad, scale):
-        """Grow ``box`` by ``scale`` around its centre, capped to the detection
-        bbox (inset by ``pad``) and the image — so text gets bigger but never
-        spills past the bubble's bounding box or the page edge."""
-        x1, y1, x2, y2 = box
-        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
-        hw, hh = (x2 - x1) / 2.0 * scale, (y2 - y1) / 2.0 * scale
-        nx1, ny1, nx2, ny2 = cx - hw, cy - hh, cx + hw, cy + hh
+        ``original``: the page before inpainting (used to estimate the old lettering when
+        ``glyph_masks`` is not given). ``glyph_masks``: per-input uint8 masks of the original
+        lettering, same order as ``inputs``. Regions with empty text are left untouched.
+        ``self.last_layout[i]`` reports what happened to input i (font size, drawn or not)."""
+        self.last_layout = [{"font_size": None, "drawn": False} for _ in (inputs or [])]
+        if not inputs:
+            return cv2pil(image) if isinstance(image, np.ndarray) else image
+        lang = lang or self.lang
+        fp = resolve_font_path(font, lang=lang, fallback=self.font_path)
+        bold = bold_font_path(font, lang=lang)
+        scale = self._clamp_text_scale(text_scale if text_scale is not None else self.text_scale)
+        clean = image if isinstance(image, np.ndarray) else pil2cv(image)
+        orig = original if original is None or isinstance(original, np.ndarray) else pil2cv(original)
+        H, W = clean.shape[:2]
+        texts = [(it.translated_text or "").strip() for it in inputs]
+        if glyph_masks is None:
+            glyph_masks = (estimate_glyph_masks(orig, clean, inputs) if orig is not None
+                           else [np.zeros((H, W), np.uint8) for _ in inputs])
+        gms = [g.copy() for g in glyph_masks]
+        dets = [it.ocr_result.detection_result for it in inputs]
+        keep = [i for i, t in enumerate(texts) if t]
+        out = cv2pil(clean).convert("RGBA")
+        ss = self.supersample
+        max_cap = int(self.max_font_size * scale)
+        min_size = self.min_font_size
+        polys = {i: _poly_mask(dets[i].segmentation, (H, W), grow=-3) for i in keep}
 
-        cap = inset_bbox(bbox, pad) or tuple(bbox)
-        cx1, cy1, cx2, cy2 = cap
-        h, w = image_shape[:2]
-        nx1 = int(max(nx1, cx1, 0))
-        ny1 = int(max(ny1, cy1, 0))
-        nx2 = int(min(nx2, cx2, w))
-        ny2 = int(min(ny2, cy2, h))
-        if nx2 <= nx1 or ny2 <= ny1:
-            return box
-        return (nx1, ny1, nx2, ny2)
+        def build_area(i, ms=1.0):
+            d, gm = dets[i], gms[i]
+            area = balloon_area(clean, d.bbox, d.segmentation, gm, margin_scale=ms)
+            if gm.any():  # the original lettering's footprint is always writable space
+                ys_, xs_ = np.nonzero(gm)
+                ays, axs = np.nonzero(area)
+                if (not len(axs) or (axs.max() - axs.min()) < 0.8 * (xs_.max() - xs_.min())
+                        or (ays.max() - ays.min()) < 0.8 * (ys_.max() - ys_.min())):
+                    pts = cv2.findNonZero(cv2.dilate(gm, np.ones((7, 7), np.uint8)))
+                    cv2.fillConvexPoly(area, cv2.convexHull(pts), 255)
+            block = cv2.dilate(_union_except(gms, keep, i), np.ones((11, 11), np.uint8))
+            if gm.any():  # own footprint stays writable even where it touches a neighbour's
+                own = np.zeros_like(gm)
+                cv2.fillConvexPoly(own, cv2.convexHull(cv2.findNonZero(gm)), 255)
+                block &= ~own
+            area &= ~block
+            if polys[i] is not None:  # never outside the balloon
+                area &= polys[i]
+            return area
 
-    def _render_single(self, measure_draw, text_draw, text, box, det_box, lang, font_path, ss=1):
-        prepared, spaced = self._prepare_text(text, lang)
+        def fit(i, area, center, style, max_size):
+            return render_region(out, texts[i], lang, area, center, style, font_path=fp,
+                                 max_size=max_size, min_size=min_size, ss=ss, dry_run=True)
 
-        # Fit search runs in original coords using `measure_draw`.
-        wrap_text, font_size = self.wrap_extraction(measure_draw, prepared, box, det_box, font_path)
-        wrap_text = self._finalize_text(wrap_text, spaced)
+        plans, fits = {}, []
+        for i in keep:
+            area = build_area(i)
+            if not area.any():
+                continue
+            gm = gms[i]
+            ys, xs = np.nonzero(gm) if gm.any() else np.nonzero(area)
+            center = (int(np.median(xs)), int((ys.min() + ys.max()) / 2))
+            style = detect_style(orig if orig is not None else clean, gm, clean, area)
+            f = fit(i, area, center, style, max_cap)
+            ref = float(np.median(fits)) if len(fits) >= 3 else None
+            if f is None or (ref and f < 0.75 * ref):  # cramped: thinner inner margin
+                a2 = build_area(i, ms=0.4)
+                f2 = fit(i, a2, center, style, max_cap)
+                if f2 is not None and (f is None or f2 > f):
+                    area, f = a2, f2
+            if f is not None:
+                fits.append(f)
+            plans[i] = [area, center, style, f, _orig_size(gm, inputs[i].ocr_result.text)]
 
-        # Draw at ss× on `text_draw`: load the font and stroke at device scale,
-        # measure at that scale, then centre within the box scaled to device space.
-        dfont = _load_font(font_path, max(1, int(round(font_size * ss))))
-        stroke = max(1, int(round(_stroke_for_font(font_size) * ss)))
-        try:
-            text_bbox = text_draw.multiline_textbbox((0, 0), wrap_text, font=dfont, align='center', stroke_width=stroke)
-            text_width = text_bbox[2] - text_bbox[0]
-            text_height = text_bbox[3] - text_bbox[1]
-        except Exception:
-            text_width, text_height = text_draw.multiline_textsize(wrap_text, font=dfont)
+        bfits = [p[3] for i, p in plans.items() if p[3] and dets[i].form_type != "free_text"]
+        if bfits:
+            self._grow_free_text(plans, dets, gms, keep, clean, float(np.median(bfits)),
+                                 lambda i, a, c, s: fit(i, a, c, s, max_cap))
 
-        x1, y1, x2, y2 = box
-        box_width = (x2 - x1) * ss
-        box_height = (y2 - y1) * ss
+        # one dialogue size per page; emphasis relative to the original lettering size
+        cap = int(np.median(bfits) * 1.12) if bfits else None
+        ghs = [p[4] for p in plans.values() if p[4]]
+        med_gh = float(np.median(ghs)) if ghs else None
+        occupied = np.zeros((H, W), np.uint8)
+        for i in sorted(plans, key=lambda k: int(np.count_nonzero(plans[k][0]))):  # small first
+            area, center, style, f, gh = plans[i]
+            area = area & ~cv2.dilate(occupied, np.ones((9, 9), np.uint8))
+            ratio = float(gh / med_gh) if (gh and med_gh) else 1.0
+            c = int(cap * float(np.clip(ratio, 1.0, 2.5))) if cap else None
+            limit = min(x for x in (f, c, max_cap) if x) if f else max_cap
+            face = bold if (bold and ratio >= 1.4) else fp
+            drawn = render_region(out, texts[i], lang, area, center, style, font_path=face,
+                                  max_size=limit, min_size=min_size, ss=ss)
+            if drawn is False and face != fp:  # the bold face may not fit at the measured size
+                face = fp
+                drawn = render_region(out, texts[i], lang, area, center, style, font_path=fp,
+                                      max_size=limit, min_size=min_size, ss=ss)
+            ok = isinstance(drawn, np.ndarray)
+            if ok:
+                occupied |= drawn
+            self.last_layout[i] = {"font_size": limit if ok else None, "fit": f, "cap": c,
+                                   "drawn": ok, "bold": ok and face != fp}
+        return out.convert("RGB")
 
-        x = x1 * ss + (box_width - text_width) / 2
-        y = y1 * ss + (box_height - text_height) / 2
-
-        text_draw.multiline_text((x, y), wrap_text, font=dfont, fill=(0, 0, 0), align='center',
-                                 stroke_width=stroke, stroke_fill=(255, 255, 255))
-        return
-
-
-    def wrap_extraction(self, draw, tokenized_text, box, det_box, font_path):
-        # `tokenized_text` already has break points marked by spaces (see _prepare_text).
-        target_width = box[2] - box[0]
-        target_height = box[3] - box[1]
-
-        low = self.min_font_size
-        high = self.max_font_size
-        best_font_size = low
-        best_wrap_text = None
-
-        while low <= high:
-            mid = (low + high) // 2
-            fits, wrap_text = self._fits_in_box(draw, mid, tokenized_text, target_width, target_height, det_box, font_path)
-            if fits:
-                best_font_size = mid
-                best_wrap_text = wrap_text
-                low = mid + 1
-            else:
-                high = mid - 1
-
-        if best_wrap_text is not None:
-            return best_wrap_text, best_font_size
-
-        # Fallback 1: shrink below min_font_size before giving up.
-        for fs in range(self.min_font_size - 1, ABSOLUTE_MIN_FONT_SIZE - 1, -1):
-            fits, wrap_text = self._fits_in_box(draw, fs, tokenized_text, target_width, target_height, det_box, font_path)
-            if fits:
-                return wrap_text, fs
-
-        # Fallback 2: truncate with ellipsis at absolute min — guarantees no overflow.
-        truncated = self._truncate_to_fit(draw, tokenized_text, target_width, target_height,
-                                          ABSOLUTE_MIN_FONT_SIZE, det_box, font_path)
-        return truncated, ABSOLUTE_MIN_FONT_SIZE
-
-
-    def _tokenize(self, text, lang):
-        """Break-unit tokens for `text` in target `lang`. Uses a caller-supplied
-        tokenizer override if set, else the language-aware default."""
-        if self.tokenizer is not None:
-            return self.tokenizer(text, lang)
-        return tokenize(text, lang)
-
-    def _prepare_text(self, text, lang):
-        """Turn `text` into a string whose spaces mark allowed line-break points,
-        ready for textwrap. Returns (prepared, spaced):
-        - spaced=True (Latin/Korean/...): spaces are real word separators; tokens
-          are the words, joined by spaces and kept as-is on output.
-        - spaced=False (Thai/CJK): original spaces are protected with a sentinel,
-          tokens (words/chars) are joined by spaces for wrapping, and those
-          token-boundary spaces are stripped on output (originals restored)."""
-        if is_space_delimited(lang):
-            return " ".join(self._tokenize(text, lang)), True
-        protected = text.replace(" ", SPACE_SENTINEL)
-        return " ".join(self._tokenize(protected, lang)), False
-
-    def _finalize_text(self, wrap_text, spaced):
-        """Undo the break-point spacing from _prepare_text after wrapping."""
-        if spaced:
-            return wrap_text
-        return wrap_text.replace(" ", "").replace(SPACE_SENTINEL, " ")
-
-    def _fits_in_box(self, draw, font_size, tokenized_text, target_width, target_height, det_box, font_path):
-        font = _load_font(font_path, font_size)
-
-        stroke = _stroke_for_font(font_size)
-        wrap_width = len(tokenized_text)
-
-        while wrap_width > 0:
-            wrap_lines = textwrap.wrap(tokenized_text, width=wrap_width, break_long_words=False)
-            wrap_text = "\n".join(wrap_lines)
-
-            try:
-                text_bbox = draw.multiline_textbbox((0, 0), wrap_text, font=font, align='center', stroke_width=stroke)
-                text_width = text_bbox[2] - text_bbox[0]
-                text_height = text_bbox[3] - text_bbox[1]
-            except Exception:
-                text_width, text_height = draw.multiline_textsize(wrap_text, font=font)
-
-            if text_width <= target_width and text_height <= target_height:
-                return True, wrap_text
-
-            wrap_width -= 1
-
-        return False, None
-
-    def _truncate_to_fit(self, draw, tokenized_text, target_width, target_height, font_size, det_box, font_path):
-        tokens = [t for t in tokenized_text.split(' ') if t]
-        if not tokens:
-            return ELLIPSIS
-
-        lo, hi = 1, len(tokens)
-        best = None
-        while lo <= hi:
-            mid = (lo + hi) // 2
-            candidate = " ".join(tokens[:mid]) + " " + ELLIPSIS
-            fits, wrap_text = self._fits_in_box(draw, font_size, candidate, target_width, target_height, det_box, font_path)
-            if fits:
-                best = wrap_text
-                lo = mid + 1
-            else:
-                hi = mid - 1
-        return best if best is not None else ELLIPSIS
+    @staticmethod
+    def _grow_free_text(plans, dets, gms, keep, clean, med, fit):
+        """Free text squeezed far below dialogue size grows into the free space around it."""
+        H, W = clean.shape[:2]
+        balloons = np.zeros((H, W), np.uint8)
+        for d in dets:
+            if d.form_type != "free_text" and d.segmentation:
+                cv2.fillPoly(balloons, [np.asarray(d.segmentation, np.int32).reshape(-1, 1, 2)], 255)
+        balloons = cv2.dilate(balloons, np.ones((9, 9), np.uint8))
+        # solid line art: strong contrast against the local background (light or dark panels);
+        # the small median removes screentone dots so a tone background stays writable
+        gray = cv2.cvtColor(clean, cv2.COLOR_BGR2GRAY)
+        g5 = cv2.medianBlur(gray, 5).astype(np.int16)
+        local = cv2.medianBlur(gray, 31).astype(np.int16)
+        balloons |= cv2.dilate(((np.abs(g5 - local) > 60) * 255).astype(np.uint8), np.ones((9, 9), np.uint8))
+        for i, p in plans.items():
+            area, center, style, f, gh = p
+            if dets[i].form_type != "free_text" or (f and f >= 0.7 * med):
+                continue
+            x1, y1, x2, y2 = (int(v) for v in dets[i].bbox)
+            gx, gy = int(0.35 * (x2 - x1)) + 8, int(0.25 * (y2 - y1)) + 8
+            grown = np.zeros_like(area)
+            grown[max(0, y1 - gy):y2 + gy, max(0, x1 - gx):x2 + gx] = 255
+            grown &= ~balloons & ~cv2.dilate(_union_except(gms, keep, i), np.ones((11, 11), np.uint8))
+            grown |= area
+            f3 = fit(i, grown, center, style)
+            if f3 is not None and (f is None or f3 > f):
+                f3 = min(f3, max(f or 0, int(0.8 * med)))  # an aside stays smaller than dialogue
+                if style.stroke is None:  # now next to tone / line art: a paper-coloured halo
+                    halo = (255, 255, 255) if sum(style.fill) < 380 else (0, 0, 0)
+                    style = replace(style, stroke=halo, stroke_frac=0.09)
+                plans[i] = [grown, center, style, f3, gh]

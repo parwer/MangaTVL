@@ -1,7 +1,7 @@
 {
-  "_comment": "Fonts available to the renderer, selectable per request via the 'font' key. 'scripts' lists which writing systems each font actually has glyphs for (verified via cmap) so a font is only offered for target languages it can render. 'defaults' maps a target language (canonical name from languages.json) to the font key used when the request doesn't specify one; 'latin' is the fallback for any space-delimited Latin language. All fonts are OFL/Apache licensed from Google Fonts.",
+  "_comment": "Fonts available to the renderer, selectable per request via the 'font' key. 'scripts' lists which writing systems each font actually has glyphs for (verified via cmap) so a font is only offered for target languages it can render. 'defaults' maps a target language (canonical name from languages.json) to the font key used when the request doesn't specify one; 'latin' is the fallback for any space-delimited Latin language. 'bold' (optional) is the face used for emphasised lettering (shouts, big captions). All fonts are OFL/Apache licensed from Google Fonts.",
   "defaults": {
-    "thai": "thsarabun",
+    "thai": "mali",
     "japanese": "yusei_magic",
     "chinese": "zhi_mang_xing",
     "chinese_traditional": "zhi_mang_xing",
@@ -11,7 +11,7 @@
   "fonts": [
     { "key": "thsarabun",        "file": "THSarabunNew.ttf",          "label": "TH Sarabun (clean)",           "scripts": ["latin", "thai"] },
     { "key": "itim",             "file": "Itim-Regular.ttf",          "label": "Itim (Thai handwriting)",      "scripts": ["latin", "thai"] },
-    { "key": "mali",             "file": "Mali-Regular.ttf",          "label": "Mali (Thai rounded)",          "scripts": ["latin", "thai"] },
+    { "key": "mali",             "file": "Mali-Medium.ttf",           "label": "Mali (Thai rounded)",          "scripts": ["latin", "thai"], "bold": "Mali-Bold.ttf" },
     { "key": "sriracha",         "file": "Sriracha-Regular.ttf",      "label": "Sriracha (Thai brush)",        "scripts": ["latin", "thai"] },
     { "key": "charm",            "file": "Charm-Regular.ttf",         "label": "Charm (Thai handwriting)",     "scripts": ["latin", "thai"] },
     { "key": "bangers",          "file": "Bangers-Regular.ttf",       "label": "Bangers (comic caps)",         "scripts": ["latin"] },

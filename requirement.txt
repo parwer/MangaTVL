@@ -17,6 +17,8 @@ pyyaml==6.0.2
 tqdm==4.67.3
 pydantic==2.13.4
 pythainlp==5.3.4
+uharfbuzz==0.57.0                   # text shaping for the renderer (Thai stacked marks, no Pillow-raqm needed)
+freetype-py==2.5.1                  # glyph rasterising for the renderer
 
 # --- detection / OCR / inpaint (deep learning) ---
 torch==2.11.0

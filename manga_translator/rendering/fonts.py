@@ -61,3 +61,14 @@ def font_path(name, lang=None, fallback=None) -> str:
             return str(_FONTS_DIR / fonts[0]["file"])
         raise FileNotFoundError("No fonts registered in fonts.json")
     return str(_FONTS_DIR / entry["file"])
+
+
+def bold_font_path(name, lang=None) -> str | None:
+    """The bold face registered for the font ``font_path(name, lang)`` resolves to, or None."""
+    entry = _by_key(name)
+    if entry is None and lang is not None:
+        defaults = _registry().get("defaults", {})
+        entry = _by_key(defaults.get(canonical_name(lang)) or defaults.get("latin"))
+    if entry is None or not entry.get("bold"):
+        return None
+    return str(_FONTS_DIR / entry["bold"])
