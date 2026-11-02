@@ -1,6 +1,6 @@
 import os
 
-from pipeline import Pipeline
+from pipeline import Pipeline, QualityPipeline
 from manga_translator.utils.common import convert_img_to_base64
 from manga_translator.rendering.fonts import list_fonts
 from fastapi import FastAPI
@@ -31,8 +31,14 @@ MODEL = os.getenv("MODEL", "google/gemini-3-flash-preview")
 # FREE_TEXT_MODEL=default (or a path) adds free-text detection next to the balloon model.
 FREE_TEXT_MODEL = os.getenv("FREE_TEXT_MODEL") or None
 
-pipe = Pipeline(provider=PROVIDER, model=MODEL, device=DEVICE,
-                user_prompt=user_prompt, free_text_model=FREE_TEXT_MODEL)
+# QUALITY=1: glyph-level pipeline (pixel text masks, LaMa, shape-aware lettering, chapter context;
+# needs the model files in manga_translator/assets/models and a GPU to be fast).
+if os.getenv("QUALITY") == "1":
+    pipe = QualityPipeline(provider=PROVIDER, model=MODEL, device=DEVICE, user_prompt=user_prompt,
+                           free_text_model=FREE_TEXT_MODEL or "default")
+else:
+    pipe = Pipeline(provider=PROVIDER, model=MODEL, device=DEVICE,
+                    user_prompt=user_prompt, free_text_model=FREE_TEXT_MODEL)
 
 
 class TranslateRequest(BaseModel):

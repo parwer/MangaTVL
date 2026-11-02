@@ -225,3 +225,111 @@ class Pipeline:
         else:
             new_size = (int(width * max_size / height), max_size)
         return cv2pil(image.resize(new_size))
+
+
+class QualityPipeline(Pipeline):
+    """Glyph-level pipeline (same API as Pipeline):
+
+    detection (hybrid when the free-text model is installed) -> glyph mask (masking) ->
+    region repairs from the glyph mask (detection.refine) -> OCR without double reads
+    (ocr.region_ocr) -> page translation with set-of-mark tags, speakers and a running chapter
+    context (translators.ContextTranslator) -> erase only the lettering, verify / repair /
+    guard (inpainting.TextEraser, LaMa) -> shape-aware lettering (rendering.TextRenderer)
+    using the original glyph masks.
+
+    The page image is always sent to the LLM (``process_image`` is ignored). ``run_batch`` /
+    ``run_batch_stream`` treat the images as one chapter in reading order: pages run one after
+    another so each page gets the context of the pages before it. Context lives per call,
+    never on the pipeline, so concurrent requests don't mix chapters.
+    """
+
+    def __init__(self, *, free_text_model="default", masker=None, inpainter=None, lama_onnx=None,
+                 device: str = "cpu", **kw):
+        from manga_translator.detection.hybrid_detection import DEFAULT_FREE_TEXT_MODEL
+        from manga_translator.inpainting import LamaInpainter, TextEraser
+        from manga_translator.masking import TextMasker
+
+        if free_text_model == "default" and not DEFAULT_FREE_TEXT_MODEL.exists():
+            free_text_model = None
+        super().__init__(free_text_model=free_text_model, device=device,
+                         inpainter=inpainter or LamaInpainter(device=device, onnx_path=lama_onnx), **kw)
+        self.masker = masker or TextMasker(device=device)
+        self.eraser = TextEraser(self.masker, self.inpainter)
+        self.last_page: dict = {}  # diagnostics of the last page (timings, regions, reverted)
+
+    async def _run_on_image(self, image: Image.Image, process_image: bool = False, *,
+                            provider=None, api_key=None, model=None, from_lang=None, to_lang=None,
+                            font=None, text_scale=None, upscale=None, upscaler=None,
+                            custom_instruction=None, chapter: dict | None = None) -> Image.Image:
+        import time
+        import cv2
+        from manga_translator.detection.refine import refine_regions
+        from manga_translator.masking import refine_mask, region_glyph_masks
+        from manga_translator.ocr.region_ocr import read_regions
+        from manga_translator.translators.context_translator import ContextTranslator
+        from manga_translator.utils.common import pil2cv
+
+        chapter = chapter if chapter is not None else {}
+        tm, t = {}, time.perf_counter()
+
+        def lap(name):
+            nonlocal t
+            tm[name] = round(time.perf_counter() - t, 3)
+            t = time.perf_counter()
+
+        image = image.convert("RGB")
+        bgr = pil2cv(image)
+        dets = self.det_model.detect(image)
+        lap("detect")
+        prob = self.masker.predict(bgr)
+        glyph = refine_mask(bgr, prob)
+        core = ((prob > 0.6) * 255).astype("uint8")  # confident letter pixels
+        dets = refine_regions(dets, self.masker.blocks, glyph, core, cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY))
+        lap("textmask")
+        ocr = read_regions(self._get_ocr(from_lang), image, dets, core)
+        lap("ocr")
+        self.last_page = {"timings": tm, "regions": len(ocr), "reverted": []}
+        if not ocr:
+            return image
+        masks = region_glyph_masks(bgr, glyph, ocr)
+
+        provider = provider or self.provider
+        translator = ContextTranslator(self._get_translator(provider, self._resolve_key(provider, api_key)))
+        results, chapter["context"] = await translator.translate(
+            ocr, image, context=chapter.get("context"), model=model, from_lang=from_lang, to_lang=to_lang,
+            custom_instruction=custom_instruction)
+        lap("translate")
+        keep = [i for i, r in enumerate(results) if (r.translated_text or "").strip()]
+        erased = self.eraser.erase(bgr, masks, [o.detection_result for o in ocr], keep)
+        for i, _ in erased.reverted:  # text survived erasing: original pixels are back, don't letter
+            results[i].translated_text = ""
+        lap("inpaint")
+        rendered = self.renderer.render(erased.clean, results, lang=to_lang or self.to_lang, font=font,
+                                        text_scale=text_scale, original=image, glyph_masks=erased.masks)
+        lap("render")
+        self.last_page.update(reverted=erased.reverted, results=results)
+        return upscale_image(rendered, factor=upscale or 1.0, method=upscaler or "lanczos", device=self.device)
+
+    async def run(self, image_path, process_image: bool = False, *, chapter: dict | None = None, **kw):
+        """One page. Pass the same ``chapter`` dict for consecutive pages to carry the context."""
+        try:
+            image = load_image(image_path)
+        except Exception as e:
+            print(f"Error loading image {image_path}: {e}")
+            return None
+        return await self._run_on_image(image, process_image, chapter=chapter, **kw)
+
+    async def run_batch(self, image_paths: List[str], process_image: bool = False,
+                        show_progress: bool = True, **kw) -> List[Image.Image]:
+        return [img async for _, img in self.run_batch_stream(image_paths, process_image, **kw)]
+
+    async def run_batch_stream(self, image_paths: List[str], process_image: bool = False, **kw):
+        """Pages in reading order, one after another, sharing one chapter context.
+        Yields ``(index, image)``; a failed page yields ``(index, None)``."""
+        chapter: dict = {}
+        for i, path in enumerate(image_paths):
+            try:
+                yield i, await self.run(path, process_image, chapter=chapter, **kw)
+            except Exception as e:
+                print(f"Error processing image {path}: {e}")
+                yield i, None
