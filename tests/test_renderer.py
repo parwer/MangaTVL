@@ -125,3 +125,17 @@ def test_thai_punctuation_and_kept_names_stay_whole():
     units = break_units("ชิโอริตัวมารกลับบ้านไปซะที", "thai", keep_words=["ชิโอริ"])
     assert units[0] == "ชิโอริ" and "".join(units) == "ชิโอริตัวมารกลับบ้านไปซะที"
     assert break_units("WHERE ARE you?", "english", keep_words=["ARE"]) == ["WHERE ", "ARE ", "you?"]
+
+
+def test_long_glossary_term_does_not_shrink_the_balloon():
+    from manga_translator.rendering.fonts import font_path
+    from manga_translator.rendering.typeset import layout
+    area = np.zeros((400, 240), np.uint8)
+    cv2.ellipse(area, (120, 200), (90, 180), 0, 0, 360, 255, -1)                # tall narrow balloon
+    text = "ในนี้บอกว่ามันคือแผ่นโลหะที่มีสัมประสิทธิ์การขยายตัวทางความร้อนต่างกันนำมาประกบติดกัน"
+    font = font_path(None, "thai")
+    free = layout(text, "thai", area, (120, 200), font, 40)
+    kept = layout(text, "thai", area, (120, 200), font, 40, keep_words=["สัมประสิทธิ์การขยายตัวทางความร้อน"])
+    assert kept[0] == free[0]                                                    # the long term may break
+    short = layout("ชิโอริกลับบ้านไปซะที", "thai", area, (120, 200), font, 40, keep_words=["ชิโอริ"])
+    assert any("ชิโอริ" in line for line in short[1])                           # a name still stays whole

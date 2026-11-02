@@ -229,8 +229,20 @@ def _break(tokens, avail, measure):
 
 
 def layout(text, lang, area, center, font_path, max_size, min_size=11, keep_words=()):
-    """Largest font size + line split that fits the area."""
+    """Largest font size + line split that fits the area; glossary words stay whole unless that costs size."""
     tokens = break_units(text, lang, keep_words)
+    res = _layout(tokens, lang, area, center, font_path, max_size, min_size)
+    if keep_words:
+        free = break_units(text, lang)
+        # a long glossary term ("สัมประสิทธิ์การขยายตัวทางความร้อน") kept on one line shrank whole balloons
+        if free != tokens:
+            alt = _layout(free, lang, area, center, font_path, max_size, min_size)
+            if alt is not None and (res is None or res[0] < 0.9 * alt[0]):
+                res = alt
+    return res
+
+
+def _layout(tokens, lang, area, center, font_path, max_size, min_size):
     if not tokens:
         return None
     cx, cy = center
