@@ -86,7 +86,26 @@ def detect_style(orig_bgr: np.ndarray, glyph_mask: np.ndarray, clean_bgr: np.nda
 
 
 def balloon_area(clean_bgr: np.ndarray, bbox, polygon, glyph_mask: np.ndarray, margin_scale: float = 1.0) -> np.ndarray:
-    """Writable area mask for one region (uint8 0/255)."""
+    """Writable area mask for one region (uint8 0/255), computed on a crop around it."""
+    H, W = clean_bgr.shape[:2]
+    x1, y1, x2, y2 = [int(v) for v in bbox]
+    pad = int(0.15 * max(x2 - x1, y2 - y1))
+    xs, ys = [x1 - pad, x2 + pad], [y1 - pad, y2 + pad]
+    if polygon is not None and len(polygon) >= 3:
+        pts = np.asarray(polygon, np.int32).reshape(-1, 2)
+        xs += [int(pts[:, 0].min()), int(pts[:, 0].max())]
+        ys += [int(pts[:, 1].min()), int(pts[:, 1].max())]
+    e = 48  # > every morphology radius used below, so the crop gives the same pixels as the full page
+    cx1, cy1, cx2, cy2 = max(0, min(xs) - e), max(0, min(ys) - e), min(W, max(xs) + e), min(H, max(ys) + e)
+    poly = None if polygon is None else (np.asarray(polygon, np.int32).reshape(-1, 2) - [cx1, cy1]).tolist()
+    sub = _balloon_area_full(clean_bgr[cy1:cy2, cx1:cx2], [x1 - cx1, y1 - cy1, x2 - cx1, y2 - cy1], poly,
+                             None if glyph_mask is None else glyph_mask[cy1:cy2, cx1:cx2], margin_scale)
+    out = np.zeros((H, W), np.uint8)
+    out[cy1:cy2, cx1:cx2] = sub
+    return out
+
+
+def _balloon_area_full(clean_bgr, bbox, polygon, glyph_mask, margin_scale=1.0):
     H, W = clean_bgr.shape[:2]
     x1, y1, x2, y2 = [int(v) for v in bbox]
     area = np.zeros((H, W), np.uint8)

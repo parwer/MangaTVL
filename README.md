@@ -271,6 +271,8 @@ companion app that runs `QualityPipeline` on the user's GPU.
 
 ```powershell
 python -m apps.companion.server          # http://127.0.0.1:8765, accepts requests from extensions only
+# MTVL_DEVICE=cuda|dml|cpu (default: cuda with torch, dml without) -- not DEVICE, which is main.py's
+# MODEL=<openrouter model> (default google/gemini-3-flash-preview)
 # Chrome -> chrome://extensions -> Developer mode -> Load unpacked -> apps/extension
 ```
 Translation tiers, picked automatically by the extension: the owner's relay (no account), Sign in with
