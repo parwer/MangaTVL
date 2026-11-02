@@ -81,17 +81,13 @@ async def translate_image(request: TranslateRequest):
 
 @app.get("/fonts/")
 async def fonts():
-    """List the fonts the renderer can use, for the client to populate a picker.
-    Each item is {key, label, scripts}; pass a chosen `key` as `font` in a
-    translate request (blank = the server's per-language default)."""
+    """List the fonts the renderer can use, for the client to populate a picker."""
     return {"fonts": list_fonts()}
 
 
 @app.post("/translate/stream/")
 async def translate_image_stream(request: TranslateRequest):
-    """Same inputs as /translate/, but streams one NDJSON line per image as soon
-    as it finishes (completion order): {"index": <request index>, "image": <base64|null>}.
-    Lets the client swap each page in place without waiting for the whole batch."""
+    """Like /translate/, but streams one NDJSON line per image as it finishes."""
     async def gen():
         async for index, img in pipe.run_batch_stream(
             image_paths=request.images,

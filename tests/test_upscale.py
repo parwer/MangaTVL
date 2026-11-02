@@ -1,4 +1,3 @@
-"""Tests for rendering.upscale — LANCZOS path + graceful Real-ESRGAN fallback."""
 from PIL import Image
 
 from manga_translator.rendering.upscale import upscale_image, MAX_FACTOR

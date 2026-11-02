@@ -1,12 +1,3 @@
-"""OCR for overlapping regions without reading the same words twice.
-
-A free_text region that overlaps a balloon (an aside written across its outline, or free
-text found by the 2-class detector) would otherwise be read by both regions and translated
-twice. Its letters are hidden (painted white) from the balloons' OCR; free text is read on
-the untouched page. Afterwards regions with no readable text are dropped, as is free text
-whose OCR has fewer than two letters (art read as "1" -- the model then echoes it, or
-confuses it with the numbered tags, and a stray digit gets lettered).
-"""
 from __future__ import annotations
 
 import cv2
@@ -21,9 +12,7 @@ def _overlap(a, b) -> bool:
 
 
 def grow_to_glyphs(regions: list[DetectionResult], glyph: np.ndarray, share: float = 0.3, pad: int = 3) -> np.ndarray:
-    """Grow each region's box to the glyph components lying mostly (>= ``share``) inside it --
-    detector boxes are often a few px tighter than the lettering -- updating ``bbox`` in place.
-    Returns the pixel mask of those glyphs (to hide)."""
+    """Grow each region's box to the glyphs mostly inside it; returns their mask."""
     H, W = glyph.shape
     n, lab, stats, _ = cv2.connectedComponentsWithStats((glyph > 0).astype(np.uint8), 8)
     out = np.zeros((H, W), np.uint8)
@@ -42,9 +31,7 @@ def grow_to_glyphs(regions: list[DetectionResult], glyph: np.ndarray, share: flo
 
 
 def read_regions(engine, image: Image.Image, dets: list[DetectionResult], core: np.ndarray | None = None) -> list[OCRResult]:
-    """OCR every detection with ``engine`` (an OCREngine), hiding overlapping free text from the
-    balloons. ``core``: confident glyph pixels (letters), used to hide exactly the free text's
-    letters. Returns the kept OCR results in detection order."""
+    """OCR all detections, hiding overlapping free text from the balloons."""
     if not dets:
         return []
     hide = [d for d in dets if d.form_type == "free_text"

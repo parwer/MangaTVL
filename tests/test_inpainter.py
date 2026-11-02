@@ -1,5 +1,3 @@
-"""Tests for inpainting/inpainter.InpainterBase — box expansion, box-based
-masking, and PanelCleaner-style safe polygon mask selection."""
 import numpy as np
 
 from manga_translator.inpainting.inpainter import InpainterBase

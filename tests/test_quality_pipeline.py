@@ -1,5 +1,3 @@
-"""Tests for the quality pipeline pieces: region repairs (detection.refine), OCR without
-double reads (ocr.region_ocr) and QualityPipeline's chapter-context flow, with stubs."""
 import asyncio
 import json
 

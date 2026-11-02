@@ -1,12 +1,3 @@
-"""Per-region glyph masks: which pixels of the page-level glyph mask belong to which
-detected region (balloon / free text).
-
-A region's mask is the glyph mask inside its polygon (+7 px) or box (+6 px), plus two
-second opinions that catch lettering CTD under-segments: off-colour pixels near the text
-inside a flat balloon, and high-contrast ink inside the OCR line boxes. Finally every pixel
-is owned by exactly one region (the smallest detection containing it), so overlapping
-balloons never erase or avoid each other's text.
-"""
 from __future__ import annotations
 
 import cv2
@@ -47,9 +38,7 @@ def region_glyph_masks(bgr: np.ndarray, glyph: np.ndarray, items: list[OCRResult
 
 
 def bubble_residue(bgr, polygon, rm, boxes) -> np.ndarray:
-    """Lettering CTD under-segments inside a flat balloon (ellipsis dots, punctuation, thin
-    strokes): pixels in the balloon's inner area that differ from the balloon colour AND lie
-    near the known text."""
+    """Off-colour pixels near the text inside a flat balloon (missed punctuation, thin strokes)."""
     H, W = rm.shape
     pts = np.asarray(polygon, np.int32).reshape(-1, 1, 2)
     poly = _poly(polygon, (H, W))
@@ -73,8 +62,7 @@ def bubble_residue(bgr, polygon, rm, boxes) -> np.ndarray:
 
 
 def ink_in_boxes(bgr, boxes, pad: int = 3) -> np.ndarray:
-    """Inside each OCR line box, pixels contrasting strongly with the box's own background
-    are ink. Catches words CTD misses (dithered / gradient balloons, unusual fonts)."""
+    """High-contrast ink inside the OCR line boxes."""
     H, W = bgr.shape[:2]
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY).astype(np.int16)
     out = np.zeros((H, W), np.uint8)
@@ -92,8 +80,7 @@ def ink_in_boxes(bgr, boxes, pad: int = 3) -> np.ndarray:
 
 
 def assign_owners(masks: list[np.ndarray], dets: list[DetectionResult], shape) -> list[np.ndarray]:
-    """A pixel claimed by several regions goes to the smallest detection (polygon, else box)
-    that contains it."""
+    """Give each contested pixel to the smallest region containing it."""
     if len(masks) < 2:
         return masks
     H, W = shape

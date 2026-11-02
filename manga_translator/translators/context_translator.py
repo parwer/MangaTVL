@@ -1,27 +1,3 @@
-"""Page-level, context-aware translation on top of any AsyncTranslatorBase provider.
-
-Compared with ``AsyncTranslatorBase.translate``:
-
-1. **Set-of-mark image**: every region gets a numbered tag on the page image, so the
-   model knows which balloon is which and who it points at.
-2. **Speaker / register**: the model names the speaker and picks Thai pronouns and
-   sentence-final particles (ครับ/ค่ะ/นะ/วะ...) from the speaker's gender, age and relationship.
-3. **Chapter context**: the reply carries a compact ``context`` (characters, glossary,
-   story so far). Pass it back with the next page so names and voices stay consistent
-   across a chapter. Pages must then be translated in reading order, one after another.
-4. **OCR repair**: the model returns the source text corrected from the image
-   (``TranslationResult.source_text``).
-5. **Swap guard**: if the corrected source of a tag does not match that region's OCR
-   (the model attached a neighbour's text to the tag), those regions are re-asked
-   text-only with the OCR text as the authority.
-
-Usage::
-
-    ctx_tr = ContextTranslator(AsyncOpenRouterTranslator(client=..., model=...))
-    context = None
-    for page in pages:                      # reading order
-        results, context = await ctx_tr.translate(ocr, page_image, context=context)
-"""
 from __future__ import annotations
 
 import json
@@ -63,10 +39,7 @@ class ContextTranslator:
     async def translate(self, ocr_result: list[OCRResult], image, *, context: dict | None = None,
                         model=None, from_lang=None, to_lang=None, custom_instruction=None,
                         capture: dict | None = None) -> tuple[list[TranslationResult], dict]:
-        """Translate one page. Returns (results in ``ocr_result`` order, context for the next page).
-
-        ``image`` (PIL) is required: the tags are drawn on it. A region the model skips keeps
-        its OCR text, like ``AsyncTranslatorBase.translate``."""
+        """Translate one page."""
         context = context or {}
         if not ocr_result:
             return [], context

@@ -1,17 +1,3 @@
-"""Balloon-shape-aware typesetting.
-
-1. **Real balloon shape**: the writable area is the balloon itself (polygon, refined by the
-   flat-colour interior around the old lettering), not its largest inscribed rectangle. Each
-   line gets its own width from the shape, so text forms the natural diamond/ellipse stack.
-2. **Balanced line breaking**: dynamic programming over break points (Thai via word
-   segmentation, never inside a word or before punctuation), minimising raggedness instead
-   of greedy wrapping that leaves a one-word last line.
-3. **Anchored where the original text was**, snapped inside the balloon.
-4. **Colour and outline matched to the original** lettering when a glyph mask is known;
-   outline only over busy backgrounds.
-5. **HarfBuzz shaping** (``shaper.py``) so Thai stacked marks render correctly, supersampled
-   and slightly softened to match scanned art.
-"""
 from __future__ import annotations
 
 import re
@@ -34,8 +20,7 @@ def _font(path, size: int):
 
 
 def break_units(text: str, lang: str) -> list[str]:
-    """Break units for line breaking: a line may end between two units, never inside one.
-    Spaces and closing punctuation stay attached to the unit before them."""
+    """Break units for line breaking: a line may end between two units, never inside one."""
     text = re.sub(r"\s+", " ", (text or "").strip())
     if not text:
         return []
@@ -165,8 +150,7 @@ def _row_halfwidth(area: np.ndarray, cx: int, y0: int, y1: int) -> int:
 
 
 def _break(tokens, avail, measure):
-    """DP: split tokens into len(avail) lines; line i width <= avail[i];
-    minimise sum((1 - w_i/avail_i)^2). Returns list of strings or None."""
+    """DP: split tokens into len(avail) lines; line i width <= avail[i]; minimise sum((1 - w_i/avail_i)^2)."""
     n, k = len(tokens), len(avail)
     INF = float("inf")
     best = [[INF] * (n + 1) for _ in range(k + 1)]
@@ -195,7 +179,7 @@ def _break(tokens, avail, measure):
 
 
 def layout(text, lang, area, center, font_path, max_size, min_size=11):
-    """Largest font size + line split that fits the area. Returns (size, lines, line_h, top) or None."""
+    """Largest font size + line split that fits the area."""
     tokens = break_units(text, lang)
     if not tokens:
         return None
@@ -224,8 +208,7 @@ def layout(text, lang, area, center, font_path, max_size, min_size=11):
 # ---------------------------------------------------------------- render
 def render_region(img: Image.Image, text: str, lang: str, area: np.ndarray, center, style: Style,
                   font_path, max_size=None, min_size: int = 11, ss: int = 3, dry_run: bool = False):
-    """Typeset one region. dry_run=True only returns the best-fit font size
-    (used for page-level size harmonisation)."""
+    """Typeset one region (dry_run: only return the best-fit font size)."""
     font_path = Path(font_path)
     ys, xs = np.nonzero(area)
     if len(xs) == 0:

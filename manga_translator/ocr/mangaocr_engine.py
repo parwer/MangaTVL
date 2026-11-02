@@ -4,18 +4,7 @@ from ..schemas.interface import OCRResult, DetectionResult
 
 
 class MangaOCREngine(OCREngine):
-    """manga-ocr backend for Japanese (incl. vertical / tategaki text).
-
-    manga-ocr (kha-white/manga-ocr) is trained specifically on Japanese manga
-    text and takes a cropped text region, returning the recognized string
-    directly — it has no internal text detector — so it slots into the same
-    per-bubble crop pipeline as EasyOCREngine / PaddleOCREngine. It produces no
-    per-line boxes, so the bubble bbox is used as the single box.
-
-    The heavy ``manga_ocr`` import (transformers + a ~400MB model) lives inside
-    ``__init__`` so it is only imported and the model only downloaded when this
-    engine is actually constructed, i.e. when a Japanese page is requested.
-    """
+    """manga-ocr backend for Japanese (incl. vertical / tategaki text)."""
 
     def __init__(self, device: str = "cpu"):
         super().__init__(backend="mangaocr")

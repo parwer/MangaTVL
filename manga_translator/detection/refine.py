@@ -1,18 +1,3 @@
-"""Region repairs from the glyph mask: text the balloon / free-text detectors missed or cut.
-
-The detectors work on boxes; the text masker (``masking.TextMasker``) sees letters. Using
-its glyph mask and text blocks:
-
-* ``straddling_blocks``: an aside written across a balloon outline (half inside, half
-  outside the polygon) becomes its own free_text region instead of being half erased.
-* ``complete_free_text``: a free_text box covering only part of a text line is grown to the
-  whole line; overlapping free_text boxes are merged.
-* ``missed_blocks``: text blocks no detection covers (captions on dark panels, text over art).
-* ``orphan_glyphs``: lettering segmented by the masker but in no text block and no detection
-  (stylised SFX), clustered into free_text candidates (the OCR letter filter drops art).
-
-``refine_regions`` applies all four in the order the pipeline uses.
-"""
 from __future__ import annotations
 
 import cv2
@@ -30,8 +15,7 @@ def _cover(a, b) -> float:
 
 def refine_regions(dets: list[DetectionResult], blocks, glyph: np.ndarray, core: np.ndarray,
                    gray: np.ndarray) -> list[DetectionResult]:
-    """All repairs. ``blocks``: masker text blocks [x1, y1, x2, y2, score]; ``glyph``: refined
-    glyph mask; ``core``: confident glyph pixels; ``gray``: the page in grayscale."""
+    """Apply all region repairs in pipeline order."""
     dets = list(dets) + straddling_blocks(dets, blocks, glyph, core, gray)
     complete_free_text(dets, blocks, glyph)
     dets += missed_blocks(dets, blocks, glyph)
@@ -40,8 +24,7 @@ def refine_regions(dets: list[DetectionResult], blocks, glyph: np.ndarray, core:
 
 # ------------------------------------------------------------------ straddling asides
 def _barrier(gray, ink, s, c, dark: int = 90) -> bool:
-    """True if a dark non-letter stroke (a balloon outline) separates two letter boxes on the
-    same line, i.e. they belong to different speakers."""
+    """True if a balloon outline separates two letter boxes on the same line."""
     if gray is None:
         return False
     xa, xb = (s[2], c[0]) if s[2] <= c[0] else (c[2], s[0])
@@ -55,12 +38,7 @@ def _barrier(gray, ink, s, c, dark: int = 90) -> bool:
 
 
 def _aside_box(g, inside, gray=None, full: float = 0.9):
-    """The aside part of a text block that straddles a balloon outline, in block coords.
-
-    The masker often merges a balloon's dialogue with an aside written just outside into one
-    block. Per letter component: mostly outside or crossing the outline -> aside (seed); fully
-    inside -> dialogue, unless it sits on the same text line right next to a *crossing* seed
-    (the inside half of an aside written across the edge). Returns (x1, y1, x2, y2) or None."""
+    """The aside part of a text block that straddles a balloon outline, in block coords."""
     n, lab, st, _ = cv2.connectedComponentsWithStats(g.astype(np.uint8), 8)
     comps = []
     for i in range(1, n):
@@ -93,8 +71,7 @@ def _aside_box(g, inside, gray=None, full: float = 0.9):
 
 
 def straddling_blocks(dets, blocks, glyph, core=None, gray=None, lo: float = 0.15, hi: float = 0.85):
-    """Text blocks partly inside, partly outside a balloon *polygon* -> free_text regions for
-    their aside part (erased by the inpainter, which also redraws the outline)."""
+    """Free-text regions for text blocks that straddle a balloon outline."""
     H, W = glyph.shape
     polys = []
     for d in dets:
@@ -133,8 +110,7 @@ def straddling_blocks(dets, blocks, glyph, core=None, gray=None, lo: float = 0.1
 
 # ------------------------------------------------------------------ partial free text
 def complete_free_text(dets, blocks, glyph, share: float = 0.3) -> None:
-    """Grow each free_text box to the glyphs of every text block it covers >= ``share`` of
-    (unless the block is inside a balloon), then merge overlapping free_text boxes. In place."""
+    """Grow free_text boxes to whole text lines and merge overlapping ones (in place)."""
     free = [d for d in dets if d.form_type == "free_text"]
     if not free:
         return
@@ -178,9 +154,7 @@ def complete_free_text(dets, blocks, glyph, share: float = 0.3) -> None:
 
 # ------------------------------------------------------------------ missed text
 def missed_blocks(dets, blocks, glyph, cover: float = 0.75) -> list[DetectionResult]:
-    """Text blocks the detectors missed -> free_text regions. Glyphs of existing detections are
-    subtracted first and the box shrunk to the remaining ink, so a block spanning several
-    balloons doesn't duplicate them."""
+    """Text blocks the detectors missed -> free_text regions."""
     taken = np.zeros_like(glyph)
     for d in dets:
         a, b, c, e = d.bbox

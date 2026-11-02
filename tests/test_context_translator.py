@@ -1,5 +1,3 @@
-"""Tests for ContextTranslator: page-level translation with set-of-mark tags, speaker and
-chapter context, on a fake provider (no network)."""
 import asyncio
 import json
 

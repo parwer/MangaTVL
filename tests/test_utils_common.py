@@ -1,4 +1,3 @@
-"""Tests for manga_translator/utils/common.py — geometry + image helpers."""
 import numpy as np
 from PIL import Image
 

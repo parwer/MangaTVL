@@ -1,23 +1,3 @@
-"""LaMa generator (Fast Fourier Convolution ResNet), written for this project.
-
-Architecture as described in "Resolution-robust Large Mask Inpainting with Fourier
-Convolutions" (Suvorov et al., WACV 2022; reference implementation advimman/lama,
-Apache-2.0). Module and parameter names follow that layout so the published Big-LaMa
-style checkpoints (e.g. the manga fine-tune ``lama_large_512px``, MIT) load with
-``strict=True``.
-
-Big-LaMa generator, input = masked RGB + mask (4 channels):
-
-    ReflectionPad(3) -> FFC 7x7 (4->64, local only)
-    -> 3 x FFC 3x3 stride 2 (64->128->256->512; the last splits 25 % local / 75 % global)
-    -> 18 x FFC residual blocks (local 128 + global 384 channels)
-    -> concat -> 3 x [ConvTranspose 3x3 stride 2, BN, ReLU] (512->256->128->64)
-    -> ReflectionPad(3) -> Conv 7x7 (64->3) -> sigmoid
-
-The "global" branch of an FFC runs a 1x1 convolution in the frequency domain
-(real FFT over H, W), which gives every layer an image-wide receptive field: that is
-what lets LaMa continue screentone and long lines across the hole.
-"""
 from __future__ import annotations
 
 import torch
@@ -60,8 +40,7 @@ class SpectralTransform(nn.Module):
 
 
 class FFC(nn.Module):
-    """Fast Fourier Convolution: channels are split into a local part (spatial conv) and a
-    global part (spectral). Four paths: l->l, l->g, g->l (spatial convs), g->g (spectral)."""
+    """Fast Fourier Convolution: local (spatial) and global (spectral) channel paths."""
 
     def __init__(self, in_ch, out_ch, kernel_size, ratio_gin, ratio_gout, stride=1, padding=0):
         super().__init__()
@@ -129,8 +108,7 @@ class ConcatTupleLayer(nn.Module):
 
 
 class LamaGenerator(nn.Module):
-    """``forward(image, mask)``: image [B,3,H,W] in 0..1, mask [B,1,H,W] (1 = hole);
-    H and W must be multiples of 8. Returns the inpainted image in 0..1."""
+    """Big-LaMa generator; forward(image, mask) with H, W multiples of 8."""
 
     def __init__(self, ngf: int = 64, n_downsampling: int = 3, n_blocks: int = 18, ratio: float = 0.75):
         super().__init__()
@@ -154,8 +132,7 @@ class LamaGenerator(nn.Module):
 
 
 def load_lama(path, device="cpu") -> LamaGenerator:
-    """Load a Big-LaMa checkpoint (raw state dict, or a training checkpoint with
-    ``gen_state_dict``) into a LamaGenerator in eval mode."""
+    """Load a Big-LaMa checkpoint into a LamaGenerator (eval mode)."""
     sd = torch.load(str(path), map_location="cpu", weights_only=False)
     sd = sd.get("gen_state_dict", sd) if isinstance(sd, dict) else sd
     gen = LamaGenerator()

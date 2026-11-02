@@ -1,5 +1,3 @@
-"""Tests for detection: HybridDetection (balloons + free text from two models) and the
-ONNX YOLO-seg decoder, without model files."""
 import numpy as np
 
 from manga_translator.detection import HybridDetection, build_detector

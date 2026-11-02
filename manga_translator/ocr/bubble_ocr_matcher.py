@@ -38,27 +38,7 @@ def match_ocr_to_bubbles(bubble_detections: List[DetectionResult],
                          iou_thresh: float = 0.1,
                          overlap_thresh: float = 0.2,
                          allow_multi_assign: bool = False) -> List[Tuple[DetectionResult, List[str], List[OCRResult]]]:
-    """
-    Match OCR results (as tuples (text, bbox)) to detected bubbles (DetectionResult).
-
-    For matched OCRs per bubble we aggregate into a single OCRResult:
-      - text: concatenation of matched texts (joined by space)
-      - boxes: appended list of bboxes from matched OCR tuples
-
-    Returns only bubbles that have at least one matched OCR.
-
-    Args:
-        bubble_detections: list of DetectionResult objects (must have .bbox)
-        ocr_results: list of tuples (text, [xmin,ymin,xmax,ymax])
-        iou_thresh: IoU threshold
-        overlap_thresh: overlap percent threshold (w.r.t OCR bbox)
-        allow_multi_assign: if True, an OCR tuple can be assigned to multiple bubbles
-
-    Returns:
-        List of tuples (DetectionResult, [texts], [OCRResult])
-          - texts: list of individual OCR text strings matched to that bubble
-          - OCRResult: aggregated OCRResult objects (typically one per bubble)
-    """
+    """Match OCR results (as tuples (text, bbox)) to detected bubbles (DetectionResult)."""
 
     # Prepare
     bubble_boxes = [det.bbox for det in bubble_detections]

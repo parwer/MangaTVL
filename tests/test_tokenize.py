@@ -1,4 +1,3 @@
-"""Tests for rendering.tokenize — language-aware line-break tokenization."""
 from manga_translator.rendering.tokenize import tokenize, is_space_delimited
 
 

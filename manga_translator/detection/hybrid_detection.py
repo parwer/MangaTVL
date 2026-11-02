@@ -1,14 +1,3 @@
-"""Hybrid detection: balloons from one model, free text from another.
-
-The 1-class balloon model (best_diplom) was trained on data with no free-text labels, so
-text outside balloons (asides, captions, SFX) is never detected. The 2-class model
-(bubble + free_text, YOLO26s-seg trained on the merged datasets) finds free text
-(7.9 % -> 67.6 % of labelled free text on its test set), but on real pages its *balloons*
-were worse (one balloon split in two, overlapping duplicates -> text read twice).
-So: balloons from the balloon model, only the free_text class from the 2-class model,
-and only free text that is not mostly inside a detected balloon (that is the balloon's own
-dialogue seen as a split balloon).
-"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -44,8 +33,7 @@ class HybridDetection(DetectorBase):
 
 
 def load_detector(model_path=None, device=None, **kw) -> DetectorBase:
-    """A detector for ``model_path``: ``.onnx`` -> ONNXDetection (onnxruntime),
-    anything else -> YoloDetection (ultralytics). None -> the default balloon model."""
+    """ONNXDetection for an .onnx file, else YoloDetection."""
     if model_path is not None and str(model_path).endswith(".onnx"):
         from .onnx_detection import ONNXDetection
         return ONNXDetection(model_path, device=device, **kw)
@@ -56,8 +44,7 @@ def load_detector(model_path=None, device=None, **kw) -> DetectorBase:
 
 
 def build_detector(balloon_model=None, free_text_model=None, device=None) -> DetectorBase:
-    """Balloon detector, made hybrid when a free-text model is given.
-    ``free_text_model="default"`` uses assets/models/bubble_freetext_yolo26s.pt."""
+    """Balloon detector, made hybrid when a free-text model is given."""
     det = load_detector(balloon_model, device)
     if free_text_model == "default":
         free_text_model = DEFAULT_FREE_TEXT_MODEL

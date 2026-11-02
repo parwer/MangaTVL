@@ -1,5 +1,3 @@
-"""Tests for masking (glyph masks) and inpainting (LaMa architecture, flat fill, eraser
-guard) on synthetic pages. No model files needed except the optional checkpoint test."""
 import cv2
 import numpy as np
 import pytest

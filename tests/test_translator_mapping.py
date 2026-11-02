@@ -1,5 +1,3 @@
-"""Tests for AsyncTranslatorBase.translate() — mapping LLM output back to OCR
-items by text_no (not positional zip), with fallback to original text."""
 import asyncio
 import json
 

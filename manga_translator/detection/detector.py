@@ -8,14 +8,7 @@ from ..schemas.interface import DetectionResult
 
 
 class DetectorBase(ABC):
-    """Common interface for detection backends.
-
-    Subclasses (ONNX, ultralytics YOLO, ...) implement ``detect`` and return
-    ``list[DetectionResult]``. ``build_results`` converts an ultralytics-style
-    output (xyxy boxes + class ids + optional polygon masks from
-    ``result.masks.xy``) into the schema in one call, so concrete subclasses
-    can stay thin.
-    """
+    """Common interface for detection backends."""
 
     DEFAULT_CLS_NAMES = {0: "bubble", 1: "free_text"}
 

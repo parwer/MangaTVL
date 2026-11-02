@@ -43,9 +43,7 @@ class AsyncTranslatorBase(ABC):
         self.RATE_LIMIT_FLAGS = asyncio.Event()
 
     def _merge_guidelines(self, custom_instruction):
-        """Effective guidelines for the system prompt: the base guidelines (this
-        translator's, or the default set) plus any per-request custom instruction
-        from the caller, marked as highest priority so the model heeds it."""
+        """Base guidelines plus the caller's custom instruction (highest priority)."""
         base = self.guidelines or DEFAULT_GUIDELINE_PROMPT
         if not custom_instruction:
             return base
@@ -66,14 +64,7 @@ class AsyncTranslatorBase(ABC):
                         model=None, from_lang=None, to_lang=None,
                         custom_instruction=None,
                         capture: dict | None = None) -> list[TranslationResult]:
-        """``custom_instruction`` (optional): a free-text instruction from the
-        caller appended to the localization guidelines for this call only.
-
-        ``capture`` (optional): when a dict is passed it is filled with the raw
-        request/response of this call — system prompt, the preprocessed user input,
-        whether an image was attached, the raw model response, token usage, the
-        parsed ``text_no`` map, and any error. Production callers omit it (no
-        behaviour change); the eval harness passes a sink to log everything."""
+        """Translate OCR results into one TranslationResult per item."""
         if not ocr_result:
             return []
 
@@ -123,8 +114,7 @@ class AsyncTranslatorBase(ABC):
         return results
 
     async def _call_with_retry(self, do_call):
-        """Shared rate-limit + exponential-backoff retry. ``do_call`` is a
-        zero-arg callable returning the provider's API coroutine."""
+        """Shared rate-limit + exponential-backoff retry."""
         for attempt in range(self.max_retries):
             if self.RATE_LIMIT_FLAGS.is_set():
                 await self.RATE_LIMIT_FLAGS.wait()
@@ -172,8 +162,7 @@ def _usage_to_dict(usage):
 
 
 class OpenAICompatibleTranslator(AsyncTranslatorBase):
-    """Shared implementation for any OpenAI-compatible chat client (OpenRouter,
-    Groq, ...) that exposes ``client.chat.completions.create``."""
+    """Translator for any OpenAI-compatible chat client."""
 
     async def _translate(self, inputs: str, image=None, *, model=None, system_prompt=None, capture=None,
                          image_detail: str = "low"):

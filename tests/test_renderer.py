@@ -1,4 +1,3 @@
-"""Tests for rendering.renderer / typeset — shape-aware lettering on synthetic pages."""
 import cv2
 import numpy as np
 from PIL import Image

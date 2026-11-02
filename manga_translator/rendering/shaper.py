@@ -1,11 +1,3 @@
-"""Complex-script text rendering (HarfBuzz shaping + FreeType rasterising), no Pillow-raqm needed.
-
-Pillow's Windows / py3.14 wheel ships without raqm, so Thai stacked marks
-(e.g. ทั้ง = ท + ั + ้ ) are drawn on top of each other or dropped. We shape with
-HarfBuzz (GPOS mark-to-mark positioning, like a browser does) and rasterise the
-glyph ids with FreeType. Outline/stroke = morphological dilation of the coverage
-mask, which gives the round-join outlines letterers use.
-"""
 from __future__ import annotations
 
 import functools
@@ -45,9 +37,7 @@ class ShapedFont:
         return self.measure(text)
 
     def render_line(self, text: str) -> tuple[np.ndarray, float]:
-        """Coverage mask (float32 0..1) for one line; returns (mask, baseline_y).
-        Width = advance width (+ overhang padding), height covers marks above
-        the ascender (Thai tone marks) and below the descender."""
+        """Coverage mask (float32 0..1) for one line; returns (mask, baseline_y)."""
         infos, pos = self.shape(text)
         pad = int(self.size * 0.5)
         width = int(sum(p.x_advance for p in pos) / 64.0) + 2 * pad

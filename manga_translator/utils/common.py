@@ -39,8 +39,7 @@ def combine_bbox(bboxes):
 
 
 def inset_bbox(bbox, pad):
-    """Shrink a bbox inward by `pad` pixels on each side.
-    Returns (x1, y1, x2, y2) or None if the result would be degenerate."""
+    """Shrink a bbox inward by `pad` pixels on each side."""
     x1, y1, x2, y2 = bbox
     x1, y1 = int(x1) + pad, int(y1) + pad
     x2, y2 = int(x2) - pad, int(y2) - pad
@@ -50,14 +49,7 @@ def inset_bbox(bbox, pad):
 
 
 def inscribed_rect(polygon, image_shape, padding=0):
-    """Largest axis-aligned rectangle that fits entirely inside `polygon`.
-
-    polygon: list/ndarray of [x, y] points (one polygon)
-    image_shape: (h, w) of the source image — used to clip the polygon bbox
-    padding: pixels to erode inward (e.g. for stroke + safety margin)
-
-    Returns (x1, y1, x2, y2) in source-image coords, or None if no valid rect remains.
-    """
+    """Largest axis-aligned rectangle that fits entirely inside `polygon`."""
     if polygon is None or len(polygon) < 3:
         return None
 
@@ -227,10 +219,7 @@ def load_image(image_path) -> Image.Image:
 
 
 def show_image_with_boxes(image, boxes, cls_text: str=None, fig_size=(10, 10), color=None):
-    """
-        image pattern: PIL, cv2
-        bboxes pattern: [[x1, y1, x2, y2], ...]
-    """
+    """Show an image (PIL or cv2) with [x1, y1, x2, y2] boxes."""
     cv_image = pil2cv(image)
     cv_image = cv_image.copy()
     if cls_text is None:
@@ -253,12 +242,7 @@ def show_image_with_boxes(image, boxes, cls_text: str=None, fig_size=(10, 10), c
 
 
 def show_image_with_polygons(image, polygons, cls_text=None, fig_size=(10, 10), color=None):
-    """
-        image pattern: PIL, cv2
-        polygons pattern: [[[x1, y1], [x2, y2], ...], ...]
-        Each polygon is a list of [x, y] points. None / empty polygons are skipped
-        (handy when some DetectionResult.segmentation is None from a detect-only model).
-    """
+    """Show an image (PIL or cv2) with polygons."""
     import matplotlib.pyplot as plt  # debug-only; lazy import keeps it off the runtime path
 
     cv_image = pil2cv(image).copy()

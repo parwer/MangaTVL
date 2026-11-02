@@ -1,19 +1,3 @@
-"""Text removal with LaMa (51M-param Fourier-convolution inpainter, manga fine-tune),
-with a free flat-colour fill where the surround is one colour.
-
-* Inside plain balloons the background around the glyphs is one colour, so filling the
-  glyph mask with the median colour of the ring around it is pixel-perfect and free.
-* Over art / screentone / gradients LaMa runs on a crop around each text cluster with
-  context, so its FFT convolutions can continue halftone patterns and lines.
-
-Two backends: PyTorch (``model_path``, a Big-LaMa checkpoint; bf16 on CUDA) or onnxruntime
-(``onnx_path``, a fixed 512x512 export; larger crops run as overlapping native-scale tiles).
-Default model: ``assets/models/lama_ft2.pt`` (tone-preserving fine-tune) when present, else
-``lama_large_512px.ckpt``.
-
-Use ``erase(bgr, mask)`` with a pixel glyph mask (masking.TextMasker). As an
-``InpainterBase`` it also works in the classic pipeline (polygon fill + box masks).
-"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -60,7 +44,7 @@ class LamaInpainter(InpainterBase):
 
     # ------------------------------------------------------------ glyph-mask erase
     def erase(self, bgr: np.ndarray, mask: np.ndarray) -> np.ndarray:
-        """bgr HxWx3 uint8, mask HxW uint8 (255 = erase). Returns a new image."""
+        """Erase ``mask`` (255 = erase) from a BGR image: flat fill or LaMa per cluster."""
         out = bgr.copy()
         if not mask.any():
             return out
@@ -122,9 +106,7 @@ class LamaInpainter(InpainterBase):
         return cv2.resize(y, (w, h), interpolation=cv2.INTER_CUBIC) if s < 1 else y
 
     def _onnx_one(self, bgr, mask, S: int = 512):
-        """Fit a crop into the fixed SxS input: crops <= S are reflect-padded at native scale
-        (LaMa is scale-sensitive: upscaling a small crop breaks lines up); larger ones are
-        downscaled and scaled back."""
+        """Run the fixed SxS ONNX model on one crop (padded, or downscaled if larger)."""
         h, w = bgr.shape[:2]
         sc = min(1.0, S / max(h, w))
         img, m = bgr, mask
@@ -141,9 +123,7 @@ class LamaInpainter(InpainterBase):
         return cv2.resize(y, (w, h), interpolation=cv2.INTER_CUBIC) if sc < 1 else y
 
     def _onnx_tiled(self, bgr, mask, S: int = 512, margin: int = 96):
-        """Native-scale SxS tiles over the mask instead of downscaling the crop (downscaled fills
-        were blurry and left letter strokes). Tiles run in order so each sees the previous
-        fills as context; each writes only its inner part (minus ``margin`` except at borders)."""
+        """Run the ONNX model in overlapping native-scale tiles."""
         h, w = bgr.shape[:2]
         out = bgr.copy()
         todo = mask > 127

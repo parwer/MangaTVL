@@ -1,5 +1,3 @@
-"""Tests for translators/utils/common.parse_response — parsing LLM output
-(plain JSON, fenced code blocks, YAML) into Python objects."""
 from manga_translator.translators.utils.common import parse_response
 
 

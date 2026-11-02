@@ -1,14 +1,3 @@
-"""YOLO-seg detection on onnxruntime only (no torch / ultralytics), e.g. for a packaged app.
-
-Reproduces what ``ultralytics.YOLO(<model>, task="segment")(img, conf, iou)`` returns for an
-Ultralytics segmentation export (``output0`` [1, 4+nc+32, N] + ``output1`` protos
-[1, 32, mh, mw], ``end2end=False``): letterbox (pad 114), per-class NMS, mask =
-sigmoid(coeffs @ protos) upsampled to the network input, cropped to the box, largest contour.
-Boxes match ultralytics at IoU >= 0.976 on real pages. Dynamic-shape exports get ultralytics'
-"rect" letterbox (pad to a stride multiple only), fixed-shape exports the square one.
-
-Export: ``YOLO("model.pt").export(format="onnx", dynamic=True)``.
-"""
 from __future__ import annotations
 
 import ast
@@ -26,9 +15,7 @@ _PROVIDERS = {"cuda": "CUDAExecutionProvider", "dml": "DmlExecutionProvider"}
 
 
 def _session(path, device=None):
-    """CPU unless ``device`` asks for "cuda" / "dml" (0 or "cuda:0" count as cuda) and that
-    provider is installed. Listing CUDA by default makes onnxruntime try to load the CUDA
-    libraries on every machine that has the GPU package, and log errors where they are missing."""
+    """onnxruntime session on the provider for ``device`` (cpu by default)."""
     import onnxruntime as ort
     ort.set_default_logger_severity(3)
     want = "cuda" if device == 0 or str(device).startswith("cuda") else str(device or "cpu")
@@ -42,7 +29,7 @@ def _session(path, device=None):
 
 
 def letterbox(rgb: np.ndarray, size, stride: int = 32, dynamic: bool = False):
-    """Resize keeping aspect + pad with 114. Returns (canvas, ratio, top, left)."""
+    """Resize keeping aspect + pad with 114."""
     h, w = rgb.shape[:2]
     H, W = size
     r = min(H / h, W / w)
@@ -59,8 +46,7 @@ def letterbox(rgb: np.ndarray, size, stride: int = 32, dynamic: bool = False):
 
 def decode_segment(pred: np.ndarray, protos: np.ndarray, nc: int, conf: float, iou: float,
                    input_hw, ratio: float, top: int, left: int, image_hw, max_det: int = 300):
-    """Decode one image of an Ultralytics seg export into
-    ``[((x1, y1, x2, y2), class_id, score, polygon or None), ...]`` in original-image pixels."""
+    """Decode an Ultralytics seg export into (box, class, score, polygon) in page pixels."""
     p = pred.T                                        # [N, 4+nc+nm]
     scores = p[:, 4:4 + nc]
     cls = scores.argmax(1)

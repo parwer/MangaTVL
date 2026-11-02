@@ -1,4 +1,3 @@
-"""Tests for rendering.fonts — font registry & per-language resolution."""
 import os
 from manga_translator.rendering.fonts import list_fonts, font_path, bold_font_path, _registry
 

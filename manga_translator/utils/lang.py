@@ -1,6 +1,3 @@
-"""Resolve a human language name (e.g. "english", "japanese", or an ISO code
-like "ja") to the language code an OCR engine expects. Backed by
-``manga_translator/assets/languages.json`` so codes live in one editable place."""
 import json
 import functools
 from pathlib import Path
@@ -16,8 +13,7 @@ def load_language_map() -> dict:
 
 
 def _lookup(name):
-    """Resolve a language name/alias (case-insensitive, trimmed) to its entry
-    dict, or None if unknown."""
+    """Language entry for a name or alias, or None."""
     if not name:
         return None
     key = str(name).strip().lower()
@@ -31,8 +27,7 @@ def _lookup(name):
 
 
 def canonical_name(name):
-    """Return the canonical language key for ``name`` (matching an alias,
-    case-insensitively), or the lowered input when unknown / None when empty."""
+    """Canonical language key for ``name`` (aliases resolved)."""
     if not name:
         return None
     key = str(name).strip().lower()
@@ -46,9 +41,7 @@ def canonical_name(name):
 
 
 def ocr_lang_code(name, engine: str = "easyocr", default: str = "en") -> str:
-    """Return the OCR code for ``name`` on ``engine`` ("easyocr" | "paddleocr").
-    Matches the canonical key or any alias, case-insensitively. Falls back to
-    ``default`` when the language or its code for that engine is unknown."""
+    """Return the OCR code for ``name`` on ``engine`` ("easyocr" | "paddleocr")."""
     entry = _lookup(name)
     if entry is None:
         return default
@@ -56,9 +49,7 @@ def ocr_lang_code(name, engine: str = "easyocr", default: str = "en") -> str:
 
 
 def ocr_engine_name(name, default: str = "easyocr") -> str:
-    """Return which OCR backend to use for source language ``name`` (e.g.
-    "easyocr" | "mangaocr"). Matches the canonical key or any alias. Falls back
-    to ``default`` when the language is unknown or specifies no engine."""
+    """OCR backend for source language ``name``."""
     entry = _lookup(name)
     if entry is None:
         return default
@@ -66,10 +57,7 @@ def ocr_engine_name(name, default: str = "easyocr") -> str:
 
 
 def wrap_mode(name, default: str = "space") -> str:
-    """Return how the renderer should break lines for TARGET language ``name``:
-    "pythainlp" (Thai word segmentation), "char" (per-character, spaceless CJK),
-    or "space" (break on spaces). Falls back to ``default`` ("space") for
-    unknown languages or ones with no ``wrap`` set."""
+    """Line-break mode for target language ``name``: "pythainlp", "char" or "space"."""
     entry = _lookup(name)
     if entry is None:
         return default

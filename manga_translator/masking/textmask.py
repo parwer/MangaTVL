@@ -1,13 +1,3 @@
-"""Pixel-level text mask with comic-text-detector (CTD) run as ONNX.
-
-Erasing the whole balloon polygon destroys anything else inside it, and erasing OCR
-rectangles smears art and leaves glyph halos. A per-pixel glyph mask lets the inpainter
-remove exactly the lettering. CTD also returns text-block boxes (``TextMasker.blocks``)
-that the pipeline uses to find text the balloon detector missed.
-
-Model: ``assets/models/comictextdetector.pt.onnx`` (not in git; the code here is our own,
-the CTD weights' license is unconfirmed -- see the data-provenance doc).
-"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -19,9 +9,7 @@ DEFAULT_MODEL = Path(__file__).resolve().parent.parent / "assets" / "models" / "
 
 
 class TextMasker:
-    """``predict(bgr) -> prob map``. ``device``: "cpu" (onnxruntime), "dml" (onnxruntime-directml)
-    or "cuda" (the ONNX graph converted to torch with onnx2torch when installed -- onnxruntime's
-    CUDA provider often lacks matching CUDA DLLs -- else onnxruntime CUDA)."""
+    """Glyph probability map and text blocks from comic-text-detector (ONNX)."""
 
     def __init__(self, model_path=DEFAULT_MODEL, size: int = 1024, device: str = "cpu"):
         self.size = size
@@ -72,8 +60,7 @@ class TextMasker:
         return cv2.resize(seg[0, 0, :nh, :nw], (w, h), interpolation=cv2.INTER_LINEAR), blocks
 
     def predict(self, bgr: np.ndarray) -> np.ndarray:
-        """Float prob map [0, 1], HxW; fills ``self.blocks``. Tall pages (webtoons) run in
-        overlapping near-square tiles so text isn't shrunk to nothing."""
+        """Glyph probability map (HxW, 0..1); fills ``self.blocks``."""
         h, w = bgr.shape[:2]
         if h <= w * 1.6:
             prob, self.blocks = self._forward_square(bgr)
@@ -94,8 +81,7 @@ class TextMasker:
 
 
 def decode_blocks(b: np.ndarray, s: float, w: int, h: int, conf: float = 0.4, nms: float = 0.35) -> list[list]:
-    """CTD block head rows [cx, cy, bw, bh, obj, cls0, cls1] (network px) ->
-    [[x1, y1, x2, y2, score], ...] in page px."""
+    """Decode CTD text-block rows into [x1, y1, x2, y2, score] in page pixels."""
     score = b[:, 4] * b[:, 5:].max(1)
     b, score = b[score > conf], score[score > conf]
     if not len(b):
@@ -111,11 +97,7 @@ def decode_blocks(b: np.ndarray, s: float, w: int, h: int, conf: float = 0.4, nm
 
 
 def refine_mask(bgr: np.ndarray, prob: np.ndarray, thresh: float = 0.3) -> np.ndarray:
-    """Binary glyph mask (uint8 0/255) grown to cover anti-aliased edges and outline strokes.
-
-    CTD under-segments soft / outlined glyph edges, and leftover 1-px fringes make erased
-    text look ghostly. Each component is dilated in proportion to its own stroke width
-    (from the distance transform), then small gaps are closed."""
+    """Binary glyph mask (uint8 0/255) grown to cover anti-aliased edges and outline strokes."""
     m = (prob > thresh).astype(np.uint8) * 255
     if not m.any():
         return m

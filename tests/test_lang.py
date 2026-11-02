@@ -1,4 +1,3 @@
-"""Tests for utils/lang — language name/alias -> OCR engine code & backend."""
 from manga_translator.utils.lang import ocr_lang_code, ocr_engine_name, load_language_map
 
 

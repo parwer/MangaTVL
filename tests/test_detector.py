@@ -1,5 +1,3 @@
-"""Tests for detection/detector.DetectorBase.build_result / build_results —
-converting ultralytics-style output into DetectionResult schema objects."""
 from manga_translator.detection.detector import DetectorBase
 
 

@@ -3,11 +3,7 @@ import json
 import yaml
 
 def parse_response(content, debug=False):
-    """
-    Parses a response string that may contain JSON or YAML content,
-    optionally wrapped in code block markers. Returns a parsed Python object.
-    Raises TypeError if parsing fails.
-    """
+    """Parse JSON or YAML from an LLM response (fenced or not)."""
     def try_parse_yaml(text):
         try:
             return yaml.safe_load(text)

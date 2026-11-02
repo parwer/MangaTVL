@@ -1,22 +1,3 @@
-"""Page renderer: letters every translated region onto the cleaned (inpainted) page.
-
-Per region the writable area is the balloon's own shape (``typeset.balloon_area``) and the
-text is typeset with balanced line breaks (``typeset.render_region``). On top of that this
-module does the *page-level* planning a letterer does:
-
-* one dialogue size per page: balloons are capped near the page median, so one small balloon
-  doesn't get huge text next to normal ones; shouts / big captions keep their emphasis
-  (relative to the original lettering size) and get the bold face when the font has one;
-* free text (asides, captions) squeezed far below dialogue size may grow into free space
-  around it -- never into a balloon, onto line art or onto other text;
-* regions never letter over each other's original text or over text already drawn;
-* text stays inside its balloon's polygon.
-
-The original lettering's footprint (glyph mask) improves anchoring, colour and size
-matching. Pass ``glyph_masks`` when the pipeline has them; otherwise, when ``original`` is
-given, it is estimated from the difference between the original and the cleaned page.
-Without either, regions are anchored at their area's centre in black (white on dark).
-"""
 from __future__ import annotations
 
 from dataclasses import replace
@@ -101,12 +82,7 @@ class TextRenderer:
 
     def render(self, image, inputs: list[TranslationResult], lang=None, font=None, text_scale=None, *,
                original=None, glyph_masks: list[np.ndarray] | None = None) -> Image.Image:
-        """Letter ``inputs`` onto ``image`` (the cleaned page; PIL or BGR array). Returns PIL RGB.
-
-        ``original``: the page before inpainting (used to estimate the old lettering when
-        ``glyph_masks`` is not given). ``glyph_masks``: per-input uint8 masks of the original
-        lettering, same order as ``inputs``. Regions with empty text are left untouched.
-        ``self.last_layout[i]`` reports what happened to input i (font size, drawn or not)."""
+        """Letter ``inputs`` onto ``image`` (the cleaned page; PIL or BGR array)."""
         self.last_layout = [{"font_size": None, "drawn": False} for _ in (inputs or [])]
         if not inputs:
             return cv2pil(image) if isinstance(image, np.ndarray) else image

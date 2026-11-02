@@ -1,15 +1,3 @@
-"""Optional output upscaling, applied to the final rendered page before it is
-returned.
-
-Two backends, chosen per request:
-- ``lanczos`` (default): plain high-quality resize. Fast, no extra deps. Makes
-  the page (and our crisp rendered text) bigger; it does not deblur the source
-  artwork, just enlarges it.
-- ``realesrgan``: AI super-resolution (anime-tuned Real-ESRGAN) that actually
-  sharpens/deblurs the artwork. Heavy and slow on CPU, and depends on
-  ``realesrgan``/``basicsr`` which aren't installed by default — so it is
-  imported lazily and **falls back to LANCZOS** if unavailable or it errors.
-"""
 import functools
 
 from PIL import Image
@@ -22,11 +10,7 @@ ANIME_MODEL_URL = (
 
 
 def upscale_image(image: Image.Image, factor=1.0, method="lanczos", device="cpu") -> Image.Image:
-    """Return ``image`` upscaled by ``factor`` using ``method``.
-
-    ``factor`` <= 1 (or falsy) is a no-op; values are clamped to ``MAX_FACTOR``.
-    ``realesrgan`` falls back to LANCZOS when the backend can't be loaded/run.
-    """
+    """Return ``image`` upscaled by ``factor`` using ``method``."""
     try:
         factor = float(factor)
     except (TypeError, ValueError):
@@ -47,7 +31,7 @@ def upscale_image(image: Image.Image, factor=1.0, method="lanczos", device="cpu"
 
 @functools.lru_cache(maxsize=2)
 def _realesrgan_upsampler(device):
-    """Build & cache a RealESRGANer (anime 6-block x4 model). Lazy heavy import."""
+    """Build & cache a RealESRGANer (anime 6-block x4 model)."""
     from realesrgan import RealESRGANer
     from basicsr.archs.rrdbnet_arch import RRDBNet
 

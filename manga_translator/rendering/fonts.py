@@ -1,11 +1,3 @@
-"""Font registry for the renderer.
-
-Fonts live in ``assets/fonts/`` and are described in ``assets/fonts.json`` so a
-request can pick one by key (``font``) and the renderer/userscript stay in sync.
-Each font records which scripts it actually has glyphs for, so a font is only
-offered for target languages it can render (a Latin-only comic font can't draw
-Thai/CJK). When a request doesn't name a font, a per-language default is used.
-"""
 import json
 import functools
 from pathlib import Path
@@ -41,13 +33,7 @@ def list_fonts() -> list[dict]:
 
 
 def font_path(name, lang=None, fallback=None) -> str:
-    """Resolve a font selection to a TTF path.
-
-    Priority: explicit ``name`` (font key) -> the ``defaults`` entry for target
-    ``lang`` (canonicalised) -> ``defaults['latin']`` -> ``fallback`` -> the
-    first registered font. Unknown keys fall through to the language default so a
-    bad ``font`` never crashes rendering.
-    """
+    """Resolve a font selection to a TTF path."""
     entry = _by_key(name)
     if entry is None and lang is not None:
         defaults = _registry().get("defaults", {})

@@ -13,22 +13,7 @@ class OCREngine:
         return []  # Return an empty list for now
 
     def clean_poly(self, cropped_image: Image.Image, poly, offset=(0, 0), fill=(255, 255, 255)) -> Image.Image:
-        """Erase everything outside ``poly`` so OCR only sees the bubble interior.
-
-        The rectangular crop usually pulls in slivers of neighbouring bubbles or
-        artwork; masking to the segmentation polygon removes that noise. When
-        ``poly`` is ``None`` (detect-only model) the image is returned unchanged.
-
-        Args:
-            cropped_image: the PIL crop (already cut to the detection bbox).
-            poly: polygon points ``[[x, y], ...]`` in full-image coordinates.
-            offset: the crop's top-left ``(x1, y1)`` used to translate ``poly``
-                into the crop's local frame.
-            fill: replacement colour for pixels outside the polygon.
-
-        Returns:
-            A new PIL image with the outside region filled.
-        """
+        """Erase everything outside ``poly`` so OCR only sees the bubble interior."""
         if poly is None or len(poly) == 0:
             return cropped_image
 

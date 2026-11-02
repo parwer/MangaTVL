@@ -1,5 +1,3 @@
-"""Tests for ocr/ocr_engine.OCREngine.clean_poly — erasing everything outside
-the bubble polygon to white before OCR."""
 import numpy as np
 from PIL import Image
 

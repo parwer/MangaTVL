@@ -30,9 +30,7 @@ class InpainterBase(ABC):
         return inpainted_image
 
     def _safe_fill_polygons(self, image, inputs: list[OCRResult]):
-        """Paint each bubble's safe interior white directly. Items whose polygon
-        is missing or fails the border-uniformity safety check are returned in
-        ``demoted`` so the caller can fall back to box-based cv2.inpaint."""
+        """Paint each bubble's safe interior white directly."""
         cv_image = pil2cv(image).copy()
         gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
         demoted: list[OCRResult] = []
@@ -57,18 +55,7 @@ class InpainterBase(ABC):
         max_erode_frac: float = 0.12,
         min_area_frac: float = 0.3,
     ):
-        """Adapted from PanelCleaner's pick_best_mask. Generate candidate masks
-        by eroding the polygon inward by increasing amounts, score each by the
-        standard deviation of source-image pixels at the mask boundary, return
-        the lowest-deviation candidate. A low std means the boundary lands on
-        uniform colour (bubble interior white) rather than the dark border line.
-        Returns None if even the best candidate exceeds ``max_std`` — caller
-        should treat that as 'too risky, skip'.
-
-        Erode depth is adaptive: scaled to the polygon's diagonal so large
-        bubbles (whose YOLO-seg polygon can overshoot by 30+ px) erode deep
-        enough, while small bubbles don't over-erode past their safe interior.
-        """
+        """Pick the polygon erosion whose border is most uniform (from PanelCleaner)."""
         h, w = image_gray.shape
         pts = np.asarray(polygon, dtype=np.int32).reshape(-1, 2)
         pw = int(pts[:, 0].max() - pts[:, 0].min())

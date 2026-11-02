@@ -7,10 +7,7 @@ import numpy as np
 
 
 class EasyOCREngine(OCREngine):
-    """EasyOCR backend that mirrors PaddleOCREngine's per-bubble pipeline:
-    crop each detection bbox -> clean outside the polygon -> OCR the crop ->
-    map boxes back to full-image coordinates. Drop-in alternative to
-    PaddleOCREngine for comparing recognition quality."""
+    """EasyOCR backend, one crop per detection."""
 
     def __init__(self, language: str, device: str = "cpu"):
         super().__init__(backend="easyocr")
@@ -62,14 +59,7 @@ class EasyOCREngine(OCREngine):
         return ocr_results
 
     def poly_to_xyxy(self, poly):
-        """
-        Accepts:
-        - poly as list/tuple of 4 points: [(x1,y1),(x2,y2),(x3,y3),(x4,y4)]
-        - or poly as flat 8-length list/array [x1,y1,x2,y2,...]
-        - or already [xmin,ymin,xmax,ymax] -> returns as-is
-        Returns:
-        [xmin, ymin, xmax, ymax] as ints (to match OCRResult.boxes schema)
-        """
+        """Convert a 4-point polygon, 8 flat values or an xyxy box to [xmin, ymin, xmax, ymax] ints."""
         arr = np.array(poly, dtype=float)
 
         if arr.ndim == 2 and arr.shape == (4, 2):

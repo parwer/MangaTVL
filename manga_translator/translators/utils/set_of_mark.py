@@ -1,6 +1,3 @@
-"""Set-of-mark tags: draw a numbered tag on each text region of the page image, so a
-vision LLM knows *which* balloon is which (and who it points at) instead of guessing
-from an unordered text list."""
 from PIL import Image, ImageDraw, ImageFont
 
 TAG_COLOR = (230, 30, 30)
@@ -16,9 +13,7 @@ def _font(size: int):
 
 
 def mark_image(image: Image.Image, boxes: list, max_side: int = 1280) -> Image.Image:
-    """Return a downscaled RGB copy of ``image`` with box i outlined and tagged "i".
-
-    ``boxes`` are [x1, y1, x2, y2] in original-image pixels; tag numbers are list indices."""
+    """Return a downscaled RGB copy of ``image`` with box i outlined and tagged "i"."""
     im = image.convert("RGB")
     s = min(1.0, max_side / max(im.size))
     im = im.resize((int(im.width * s), int(im.height * s)), Image.LANCZOS) if s < 1 else im.copy()

@@ -75,11 +75,7 @@ class Pipeline:
         self.ocr_engine = self._get_ocr(self.from_lang)
 
     def _get_ocr(self, from_lang):
-        """OCR engine for the given source language. Uses the caller-supplied
-        engine if one was passed; otherwise picks a backend per language
-        (Japanese -> manga-ocr for vertical text, others -> EasyOCR) and caches
-        one instance per (engine, code) so switching from_lang doesn't reload
-        the model each time."""
+        """OCR engine for the given source language."""
         if self._ocr_override is not None:
             return self._ocr_override
 
@@ -180,8 +176,7 @@ class Pipeline:
                         show_progress: bool = True, *, provider=None, api_key=None,
                         model=None, from_lang=None, to_lang=None, font=None, text_scale=None,
                         upscale=None, upscaler=None, custom_instruction=None) -> List[Image.Image]:
-        """Process multiple images concurrently. API-call concurrency is throttled by the
-        translator's semaphore (CONCURRENT_REQUESTS)."""
+        """Process multiple images concurrently."""
         tasks = [
             self.run(path, process_image, provider=provider, api_key=api_key,
                      model=model, from_lang=from_lang, to_lang=to_lang, font=font, text_scale=text_scale,
@@ -196,10 +191,7 @@ class Pipeline:
                                provider=None, api_key=None, model=None,
                                from_lang=None, to_lang=None, font=None, text_scale=None,
                                upscale=None, upscaler=None, custom_instruction=None):
-        """Like run_batch, but yields ``(index, image)`` as each image finishes
-        (completion order, not request order) so callers can stream results
-        instead of waiting for the whole batch. A failed image yields
-        ``(index, None)``; ``index`` lets the caller map it back to the request."""
+        """Like run_batch, but yields ``(index, image)`` as each image finishes."""
         async def _indexed(i, path):
             try:
                 img = await self.run(
@@ -228,20 +220,7 @@ class Pipeline:
 
 
 class QualityPipeline(Pipeline):
-    """Glyph-level pipeline (same API as Pipeline):
-
-    detection (hybrid when the free-text model is installed) -> glyph mask (masking) ->
-    region repairs from the glyph mask (detection.refine) -> OCR without double reads
-    (ocr.region_ocr) -> page translation with set-of-mark tags, speakers and a running chapter
-    context (translators.ContextTranslator) -> erase only the lettering, verify / repair /
-    guard (inpainting.TextEraser, LaMa) -> shape-aware lettering (rendering.TextRenderer)
-    using the original glyph masks.
-
-    The page image is always sent to the LLM (``process_image`` is ignored). ``run_batch`` /
-    ``run_batch_stream`` treat the images as one chapter in reading order: pages run one after
-    another so each page gets the context of the pages before it. Context lives per call,
-    never on the pipeline, so concurrent requests don't mix chapters.
-    """
+    """Glyph-level pipeline with chapter context; same API as Pipeline."""
 
     def __init__(self, *, free_text_model="default", masker=None, inpainter=None, lama_onnx=None,
                  device: str = "cpu", **kw):
@@ -311,7 +290,7 @@ class QualityPipeline(Pipeline):
         return upscale_image(rendered, factor=upscale or 1.0, method=upscaler or "lanczos", device=self.device)
 
     async def run(self, image_path, process_image: bool = False, *, chapter: dict | None = None, **kw):
-        """One page. Pass the same ``chapter`` dict for consecutive pages to carry the context."""
+        """Run one page; pass the same ``chapter`` dict to carry the context."""
         try:
             image = load_image(image_path)
         except Exception as e:
@@ -324,8 +303,7 @@ class QualityPipeline(Pipeline):
         return [img async for _, img in self.run_batch_stream(image_paths, process_image, **kw)]
 
     async def run_batch_stream(self, image_paths: List[str], process_image: bool = False, **kw):
-        """Pages in reading order, one after another, sharing one chapter context.
-        Yields ``(index, image)``; a failed page yields ``(index, None)``."""
+        """Run pages in reading order with one shared chapter context."""
         chapter: dict = {}
         for i, path in enumerate(image_paths):
             try:

@@ -1,17 +1,3 @@
-"""Erase the lettering of selected regions, check the result, repair, and refuse to make a
-region worse than the original.
-
-1. **Erase**: per region, its glyph mask. Inside a balloon whose surround (judged on balloon
-   pixels only) is flat, the median colour is painted; everything else goes to LaMa.
-2. **Verify & repair** (up to 2 rounds): CTD runs again on the cleaned page; text it still
-   finds inside the regions is added to their masks and inpainted again (CTD under-segments
-   dithered / gradient balloons). A balloon's repair zone stops at its outline (+7 px), so the
-   repair never grows onto text outside it.
-3. **Do-no-harm guard**: a half-erased balloon or SFX looks worse than the untouched original.
-   If ink still survives in a region (residue that contrasts with its surroundings, inside the
-   balloon, above max(60 px, 4 % of its mask)), that region's original pixels are restored and
-   it is reported in ``reverted`` -- the caller must not letter it.
-"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -52,8 +38,7 @@ class TextEraser:
 
     def erase(self, bgr: np.ndarray, masks: list[np.ndarray], dets: list[DetectionResult],
               keep: list[int] | None = None) -> EraseResult:
-        """``masks[i]`` / ``dets[i]``: glyph mask and detection of region i; only regions in
-        ``keep`` (default: all) are erased."""
+        """Erase the regions in ``keep``, repair, and revert regions whose text survives."""
         keep = list(range(len(masks))) if keep is None else list(keep)
         masks = [m.copy() for m in masks]
         H, W = bgr.shape[:2]
