@@ -25,8 +25,10 @@ def same_text(ocr: str, source: str, thr: float = 0.45) -> bool:
 
 
 class ContextTranslator:
-    def __init__(self, translator: AsyncTranslatorBase, *, max_side: int = 1280, jpeg_quality: int = 88):
+    def __init__(self, translator: AsyncTranslatorBase, *, max_side: int = 1280, jpeg_quality: int = 88,
+                 keep_nontext: bool = False):
         self.translator = translator
+        self.keep_nontext = keep_nontext  # experimental: let the model skip logos / kana SFX / art
         self.max_side = max_side
         self.jpeg_quality = jpeg_quality
 
@@ -47,7 +49,8 @@ class ContextTranslator:
         model = model or tr.model
         src, dst = from_lang or tr.from_lang, to_lang or tr.to_lang
         marked = mark_image(image, [o.detection_result.bbox for o in ocr_result], self.max_side)
-        system = get_context_sys_prompt(json.dumps(context, ensure_ascii=False), src, dst, custom_instruction)
+        system = get_context_sys_prompt(json.dumps(context, ensure_ascii=False), src, dst, custom_instruction,
+                                        keep_nontext=self.keep_nontext)
         inputs = "OCR per region:\n" + "\n".join(f"[{n}] {o.text}" for n, o in enumerate(ocr_result))
         if capture is not None:
             capture.update(model=model, system_prompt=system, user_input=inputs, image_attached=True)
@@ -70,6 +73,10 @@ class ContextTranslator:
         out, suspect = [], []
         for n, o in enumerate(ocr_result):
             x = by_n.get(n, {})
+            if self.keep_nontext and x.get("keep") is True:  # not text: left unerased and unlettered
+                out.append(TranslationResult(ocr_result=o, translated_text="", speaker=x.get("speaker") or "",
+                                             source_text=o.text))
+                continue
             source = x.get("source") or o.text
             out.append(TranslationResult(ocr_result=o, translated_text=x.get("translation") or o.text,
                                          speaker=x.get("speaker") or "", source_text=source))

@@ -122,6 +122,7 @@ def stub_pipeline(llm):
     rendered = []
     qp.renderer = Stub(render=lambda clean, results, **kw: rendered.append([r.translated_text for r in results]) or Image.new("RGB", (300, 200)))
     qp.provider, qp.to_lang, qp.device = "fake", "thai", "cpu"
+    qp.keep_nontext = False
     return qp, rendered
 
 

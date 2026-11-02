@@ -35,7 +35,8 @@ FREE_TEXT_MODEL = os.getenv("FREE_TEXT_MODEL") or None
 # needs the model files in manga_translator/assets/models and a GPU to be fast).
 if os.getenv("QUALITY") == "1":
     pipe = QualityPipeline(provider=PROVIDER, model=MODEL, device=DEVICE, user_prompt=user_prompt,
-                           free_text_model=FREE_TEXT_MODEL or "default")
+                           free_text_model=FREE_TEXT_MODEL or "default",
+                           keep_nontext=os.getenv("KEEP_NONTEXT") == "1")  # experimental
 else:
     pipe = Pipeline(provider=PROVIDER, model=MODEL, device=DEVICE,
                     user_prompt=user_prompt, free_text_model=FREE_TEXT_MODEL)

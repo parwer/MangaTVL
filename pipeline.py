@@ -256,7 +256,7 @@ class QualityPipeline(Pipeline):
     """Glyph-level pipeline with chapter context; same API as Pipeline."""
 
     def __init__(self, *, free_text_model="default", masker=None, inpainter=None, lama_onnx=None,
-                 device: str = "cpu", **kw):
+                 device: str = "cpu", keep_nontext: bool = False, **kw):
         from manga_translator.detection.hybrid_detection import DEFAULT_FREE_TEXT_MODEL
         from manga_translator.inpainting import LamaInpainter, TextEraser
         from manga_translator.masking import TextMasker
@@ -267,6 +267,7 @@ class QualityPipeline(Pipeline):
                          inpainter=inpainter or LamaInpainter(device=device, onnx_path=lama_onnx), **kw)
         self.masker = masker or TextMasker(device=device)
         self.eraser = TextEraser(self.masker, self.inpainter)
+        self.keep_nontext = keep_nontext  # experimental: logos / kana SFX left untouched
         self.last_page: dict = {}  # diagnostics of the last page (timings, regions, reverted)
 
     def analyze(self, image: Image.Image, from_lang=None) -> "PageState":
@@ -307,7 +308,7 @@ class QualityPipeline(Pipeline):
             provider = provider or self.provider
             translator = self._get_translator(provider, self._resolve_key(provider, api_key))
         t = time.perf_counter()
-        results, chapter["context"] = await ContextTranslator(translator).translate(
+        results, chapter["context"] = await ContextTranslator(translator, keep_nontext=self.keep_nontext).translate(
             page.ocr, page.image, context=chapter.get("context"), model=model, from_lang=from_lang,
             to_lang=to_lang, custom_instruction=custom_instruction, capture=capture)
         page.lap("translate", t)

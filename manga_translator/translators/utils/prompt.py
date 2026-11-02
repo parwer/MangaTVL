@@ -98,9 +98,17 @@ Translate ONLY these (text is exact, do not swap):
 Return JSON {{"regions":[{{"n":0,"translation":"..."}}]}}"""
 
 
-def get_context_sys_prompt(context: str, from_lang="English", to_lang="Thai", custom_instruction=None):
-    extra = ""
+KEEP_NONTEXT_RULE = """- a tag on something that is NOT {from_lang} text -- untranslated original-language sound effects drawn
+  into the art (e.g. Japanese kana), logos / title art, signatures, page numbers, or art the OCR misread
+  as letters -- gets "keep": true and an empty translation; it is left untouched on the page.
+  {from_lang} sound effects and shouts are text: translate them.
+"""
+
+
+def get_context_sys_prompt(context: str, from_lang="English", to_lang="Thai", custom_instruction=None,
+                           keep_nontext=False):
+    extra = KEEP_NONTEXT_RULE.format(from_lang=from_lang) if keep_nontext else ""
     if custom_instruction:
-        extra = ("- additional user instruction (highest priority, override the above if they conflict): "
+        extra += ("- additional user instruction (highest priority, override the above if they conflict): "
                  f"{custom_instruction}\n")
     return CONTEXT_SYSTEM_PROMPT.format(from_lang=from_lang, to_lang=to_lang, context=context, extra=extra)

@@ -106,3 +106,14 @@ def test_mark_image_downscales_and_draws_tags():
 
 def test_parse_response_keeps_first_object_on_extra_data():
     assert parse_response('{"regions": [{"n": 0}]}\n}') == {"regions": [{"n": 0}]}
+
+
+def test_keep_nontext_is_off_by_default_and_skips_marked_regions_when_on():
+    reply = {"regions": [{"n": 0, "source": "HELLO THERE", "translation": "สวัสดี"},
+                         {"n": 1, "keep": True, "translation": ""}]}
+    off = asyncio.run(ContextTranslator(FakeTranslator([reply, {"regions": []}])).translate(REGIONS, PAGE))[0]
+    assert off[1].translated_text == "WHO ARE YOU?"            # off: falls back to the OCR text
+    fake = FakeTranslator([reply])
+    on = asyncio.run(ContextTranslator(fake, keep_nontext=True).translate(REGIONS, PAGE))[0]
+    assert [r.translated_text for r in on] == ["สวัสดี", ""]
+    assert '"keep": true' in fake.calls[0]["system"] and len(fake.calls) == 1
