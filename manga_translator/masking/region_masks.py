@@ -40,25 +40,34 @@ def region_glyph_masks(bgr: np.ndarray, glyph: np.ndarray, items: list[OCRResult
 def bubble_residue(bgr, polygon, rm, boxes) -> np.ndarray:
     """Off-colour pixels near the text inside a flat balloon (missed punctuation, thin strokes)."""
     H, W = rm.shape
-    pts = np.asarray(polygon, np.int32).reshape(-1, 1, 2)
-    poly = _poly(polygon, (H, W))
-    _, _, w, h = cv2.boundingRect(pts)
+    pts = np.asarray(polygon, np.int32).reshape(-1, 2)
+    x, y, w, h = cv2.boundingRect(pts.reshape(-1, 1, 2))
     e = max(4, int(0.05 * np.hypot(w, h)))
+    # work on a crop: everything below is limited to the polygon, plus the 31 px "near" halo
+    m = e + 20
+    x1, y1, x2, y2 = max(0, x - m), max(0, y - m), min(W, x + w + m), min(H, y + h + m)
+    out = np.zeros_like(rm)
+    if x2 <= x1 or y2 <= y1:
+        return out
+    sub, rms = bgr[y1:y2, x1:x2], rm[y1:y2, x1:x2]
+    poly = np.zeros(rms.shape, np.uint8)
+    cv2.fillPoly(poly, [(pts - [x1, y1]).astype(np.int32).reshape(-1, 1, 2)], 255)
     inner = cv2.erode(poly, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * e + 1, 2 * e + 1)))
-    px = bgr[inner > 0].astype(np.float32)
+    px = sub[inner > 0].astype(np.float32)
     if len(px) < 50:
-        return np.zeros_like(rm)
+        return out
     bgc = np.median(px, 0)
-    ring = inner & ~cv2.dilate(rm, np.ones((5, 5), np.uint8))
-    ring_px = bgr[ring > 0].astype(np.float32)
+    ring = inner & ~cv2.dilate(rms, np.ones((5, 5), np.uint8))
+    ring_px = sub[ring > 0].astype(np.float32)
     if not len(ring_px) or ring_px.std(0).max() > 12:  # not a flat balloon -> leave it to CTD
-        return np.zeros_like(rm)
-    diff = ((np.abs(bgr.astype(np.float32) - bgc).max(2) > 40) * 255).astype(np.uint8) & inner
-    near = rm.copy()
+        return out
+    diff = ((np.abs(sub.astype(np.float32) - bgc).max(2) > 40) * 255).astype(np.uint8) & inner
+    near = rms.copy()
     for a, b, c, d in boxes or []:
-        cv2.rectangle(near, (a, b), (c, d), 255, -1)
+        cv2.rectangle(near, (a - x1, b - y1), (c - x1, d - y1), 255, -1)
     near = cv2.dilate(near, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (31, 31)))
-    return cv2.dilate(diff & near, np.ones((5, 5), np.uint8)) & inner
+    out[y1:y2, x1:x2] = cv2.dilate(diff & near, np.ones((5, 5), np.uint8)) & inner
+    return out
 
 
 def ink_in_boxes(bgr, boxes, pad: int = 3) -> np.ndarray:
@@ -86,22 +95,34 @@ def assign_owners(masks: list[np.ndarray], dets: list[DetectionResult], shape) -
     H, W = shape
     owner = np.full((H, W), -1, np.int32)
     best = np.full((H, W), np.inf, np.float32)
-    for i, d in enumerate(dets):
+    for i, d in enumerate(dets):  # each region only touches its own box
         if d.segmentation:
-            shp = _poly(d.segmentation, (H, W))
+            pts = np.asarray(d.segmentation, np.int32).reshape(-1, 2)
+            x, y, w, h = cv2.boundingRect(pts.reshape(-1, 1, 2))
+            x1, y1, x2, y2 = max(0, x), max(0, y), min(W, x + w), min(H, y + h)
+            if x2 <= x1 or y2 <= y1:
+                continue
+            shp = np.zeros((y2 - y1, x2 - x1), np.uint8)
+            cv2.fillPoly(shp, [(pts - [x1, y1]).astype(np.int32).reshape(-1, 1, 2)], 255)
         else:
             a, b, c, e = d.bbox
-            shp = np.zeros((H, W), np.uint8)
-            shp[max(0, b):e, max(0, a):c] = 255
+            x1, y1, x2, y2 = max(0, a), max(0, b), min(W, c), min(H, e)
+            if x2 <= x1 or y2 <= y1:
+                continue
+            shp = np.full((y2 - y1, x2 - x1), 255, np.uint8)
         area = float(np.count_nonzero(shp)) or float("inf")
-        take = (shp > 0) & (area < best)
-        owner[take], best[take] = i, area
+        take = (shp > 0) & (area < best[y1:y2, x1:x2])
+        owner[y1:y2, x1:x2][take], best[y1:y2, x1:x2][take] = i, area
     claims = np.zeros((H, W), np.int32)
     for m in masks:
         claims += m > 0
     out = []
     for i, m in enumerate(masks):
-        contested = (m > 0) & (claims > 1)
-        keep = (m > 0) & ~(contested & (owner != i) & (owner >= 0))
-        out.append((keep * 255).astype(np.uint8))
+        o = np.zeros_like(m)
+        x, y, w, h = cv2.boundingRect(m)
+        if w:
+            ms, cs, ow = m[y:y + h, x:x + w] > 0, claims[y:y + h, x:x + w], owner[y:y + h, x:x + w]
+            keep = ms & ~(ms & (cs > 1) & (ow != i) & (ow >= 0))
+            o[y:y + h, x:x + w] = keep * 255
+        out.append(o)
     return out
