@@ -148,3 +148,20 @@ def test_lock_glossary_reasks_a_line_with_the_wrong_spelling():
     assert new_ctx["glossary"]["Iori"] == "อิโอริ"            # the first spelling stays
     assert out[0].translated_text == "หวัดดี อิโอริ" and len(fake.calls) == 2
     assert "glossary spellings exactly" in fake.calls[1]["inputs"]
+
+
+def test_source_read_from_the_image_over_garbage_ocr_is_trusted():
+    # OCR read "DEE? eRenz"; the model read "DEEP BREATH" from the image: not a swap, no re-ask
+    regions = [ocr("DEE? eRenz", [10, 10, 120, 60]), REGIONS[1]]
+    fake = FakeTranslator([{"regions": [{"n": 0, "source": "DEEP BREATH", "translation": "สูดหายใจ"},
+                                        {"n": 1, "source": "WHO ARE YOU?", "translation": "เป็นใคร"}]}])
+    out, _ = asyncio.run(ContextTranslator(fake).translate(regions, PAGE))
+    assert out[0].translated_text == "สูดหายใจ" and out[0].source_text == "DEEP BREATH"
+    assert len(fake.calls) == 1
+
+
+def test_short_words_sharing_letters_are_not_a_swap():
+    from manga_translator.translators.context_translator import is_swap
+    ocr_texts = ["DEE? eRenz", "REALLY?", "ON ONe CONDITION:"]
+    assert not is_swap(0, "BREATH", ocr_texts)               # shares letters with REALLY? by chance
+    assert is_swap(0, "ON ONE CONDITION.", ocr_texts)        # really another region's text

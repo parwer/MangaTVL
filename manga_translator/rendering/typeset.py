@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageFilter
 
-from ..utils.lang import canonical_name
+from ..utils.lang import canonical_name, wrap_mode
 from .shaper import get_font, stroke_mask
 from .tokenize import tokenize
 
@@ -19,14 +19,45 @@ def _font(path, size: int):
     return get_font(str(path), int(size))
 
 
-def break_units(text: str, lang: str) -> list[str]:
+def _merge_spans(toks: list[str], text: str, words) -> list[str]:
+    """Join the tokens that make up each occurrence of a word in ``words`` (e.g. a name)."""
+    if "".join(toks) != text:
+        return toks
+    ends, pos = [], 0
+    for t in toks:
+        pos += len(t)
+        ends.append(pos)
+    groups = list(range(len(toks)))  # token -> id of the merged unit it belongs to
+    for w in sorted({w for w in words if len(w) >= 2}, key=len, reverse=True):
+        for m in re.finditer(re.escape(w), text):
+            idx = [i for i, e in enumerate(ends) if e - len(toks[i]) < m.end() and e > m.start()]
+            for i in idx[1:]:
+                groups[i] = groups[idx[0]]
+    out, last = [], None
+    for t, g in zip(toks, groups):
+        if out and g == last:
+            out[-1] += t
+        else:
+            out.append(t)
+        last = g
+    return out
+
+
+def break_units(text: str, lang: str, keep_words=()) -> list[str]:
     """Break units for line breaking: a line may end between two units, never inside one."""
     text = re.sub(r"\s+", " ", (text or "").strip())
     if not text:
         return []
-    toks = tokenize(text, lang)
+    if wrap_mode(lang) == "pythainlp":
+        # segment words and punctuation runs separately: "มาร..." was cut as "มา" + "ร." (abbreviation)
+        toks = [t for part in re.split(r"([.…!?~,;:！？。、]+)", text) if part
+                for t in ([part] if re.fullmatch(r"[.…!?~,;:！？。、]+", part) else tokenize(part, lang))]
+    else:
+        toks = tokenize(text, lang)
     if " " not in "".join(toks) and " " in text:  # space-delimited split: put the separators back
         toks = [t + " " for t in toks[:-1]] + toks[-1:]
+    if keep_words:
+        toks = _merge_spans(toks, text, keep_words)
     out: list[str] = []
     for t in toks:
         if not t:
@@ -197,9 +228,9 @@ def _break(tokens, avail, measure):
     return lines[::-1]
 
 
-def layout(text, lang, area, center, font_path, max_size, min_size=11):
+def layout(text, lang, area, center, font_path, max_size, min_size=11, keep_words=()):
     """Largest font size + line split that fits the area."""
-    tokens = break_units(text, lang)
+    tokens = break_units(text, lang, keep_words)
     if not tokens:
         return None
     cx, cy = center
@@ -226,7 +257,8 @@ def layout(text, lang, area, center, font_path, max_size, min_size=11):
 
 # ---------------------------------------------------------------- render
 def render_region(img: Image.Image, text: str, lang: str, area: np.ndarray, center, style: Style,
-                  font_path, max_size=None, min_size: int = 11, ss: int = 3, dry_run: bool = False):
+                  font_path, max_size=None, min_size: int = 11, ss: int = 3, dry_run: bool = False,
+                  keep_words=()):
     """Typeset one region (dry_run: only return the best-fit font size)."""
     font_path = Path(font_path)
     bx, by, bw, bh = cv2.boundingRect(area)
@@ -238,16 +270,16 @@ def render_region(img: Image.Image, text: str, lang: str, area: np.ndarray, cent
     if area[np.clip(cy, 0, area.shape[0] - 1), np.clip(cx, 0, area.shape[1] - 1)] == 0:
         dt = cv2.distanceTransform(area, cv2.DIST_L2, 3)
         cy, cx = np.unravel_index(int(dt.argmax()), dt.shape)
-    res = layout(text, lang, area, (cx, cy), font_path, max_size, min_size)
+    res = layout(text, lang, area, (cx, cy), font_path, max_size, min_size, keep_words)
     if res is None:  # retry from the area's most open point (DT peak)
         dt = cv2.distanceTransform(area, cv2.DIST_L2, 3)
         py, px = np.unravel_index(int(dt.argmax()), dt.shape)
         if (px, py) != (cx, cy):
-            res = layout(text, lang, area, (int(px), int(py)), font_path, max_size, min_size)
+            res = layout(text, lang, area, (int(px), int(py)), font_path, max_size, min_size, keep_words)
             if res is not None:
                 cx, cy = int(px), int(py)
     if res is None:  # last resort: smaller sizes (the area is not grown: text stays inside the balloon)
-        res = layout(text, lang, area, (cx, cy), font_path, max_size, min(min_size, 8))
+        res = layout(text, lang, area, (cx, cy), font_path, max_size, min(min_size, 8), keep_words)
         if res is None:
             return None if dry_run else False
     size, lines, line_h, top = res

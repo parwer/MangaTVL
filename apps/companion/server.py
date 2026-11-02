@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
-from pipeline import QualityPipeline  # noqa: E402
+from pipeline import QualityPipeline, glossary_words  # noqa: E402
 from manga_translator.schemas.interface import TranslationResult  # noqa: E402
 
 VERSION = "0.2.0"
@@ -179,7 +179,8 @@ async def translate(req: TranslateReq):
             raise HTTPException(429, "โควตาฟรีวันนี้หมดแล้ว — กด Sign in with OpenRouter เพื่อแปลต่อ") from e
         raise HTTPException(502, f"{prov}: {e}") from e
     async with LOCK:
-        out = await asyncio.to_thread(pipe().finish, page, results, req.to_lang)
+        out = await asyncio.to_thread(pipe().finish, page, results, req.to_lang, None, None,
+                                      glossary_words(chapter["context"]))
     return {"image": encode(out), "context": chapter["context"],
             "bubbles": [{"n": n, "speaker": r.speaker, "text": r.translated_text} for n, r in enumerate(results)]}
 

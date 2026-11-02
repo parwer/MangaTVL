@@ -118,3 +118,10 @@ def test_break_units():
     assert "".join(th) == "สวัสดีครับ!" and th[-1].endswith("!") and len(th) >= 2
     assert break_units("こんにちは。", "japanese")[-1] == "は。"
     assert break_units("   ", "thai") == []
+
+
+def test_thai_punctuation_and_kept_names_stay_whole():
+    assert break_units("ตัวมาร...", "thai") == ["ตัว", "มาร..."]           # was "มา" + "ร..." (abbreviation)
+    units = break_units("ชิโอริตัวมารกลับบ้านไปซะที", "thai", keep_words=["ชิโอริ"])
+    assert units[0] == "ชิโอริ" and "".join(units) == "ชิโอริตัวมารกลับบ้านไปซะที"
+    assert break_units("WHERE ARE you?", "english", keep_words=["ARE"]) == ["WHERE ", "ARE ", "you?"]

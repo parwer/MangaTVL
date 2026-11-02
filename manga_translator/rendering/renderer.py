@@ -92,7 +92,7 @@ class TextRenderer:
             return 1.0
 
     def render(self, image, inputs: list[TranslationResult], lang=None, font=None, text_scale=None, *,
-               original=None, glyph_masks: list[np.ndarray] | None = None) -> Image.Image:
+               original=None, glyph_masks: list[np.ndarray] | None = None, keep_words=()) -> Image.Image:
         """Letter ``inputs`` onto ``image`` (the cleaned page; PIL or BGR array)."""
         self.last_layout = [{"font_size": None, "drawn": False} for _ in (inputs or [])]
         if not inputs:
@@ -138,7 +138,7 @@ class TextRenderer:
 
         def fit(i, area, center, style, max_size):
             return render_region(out, texts[i], lang, area, center, style, font_path=fp,
-                                 max_size=max_size, min_size=min_size, ss=ss, dry_run=True)
+                                 max_size=max_size, min_size=min_size, ss=ss, dry_run=True, keep_words=keep_words)
 
         plans, fits = {}, []
         for i in keep:
@@ -180,11 +180,11 @@ class TextRenderer:
             limit = min(x for x in (f, c, max_cap) if x) if f else max_cap
             face = bold if (bold and ratio >= 1.4) else fp
             drawn = render_region(out, texts[i], lang, area, center, style, font_path=face,
-                                  max_size=limit, min_size=min_size, ss=ss)
+                                  max_size=limit, min_size=min_size, ss=ss, keep_words=keep_words)
             if drawn is False and face != fp:  # the bold face may not fit at the measured size
                 face = fp
                 drawn = render_region(out, texts[i], lang, area, center, style, font_path=fp,
-                                      max_size=limit, min_size=min_size, ss=ss)
+                                      max_size=limit, min_size=min_size, ss=ss, keep_words=keep_words)
             ok = isinstance(drawn, np.ndarray)
             if ok:
                 occupied |= drawn

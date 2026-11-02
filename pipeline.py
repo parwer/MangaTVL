@@ -231,6 +231,11 @@ class Pipeline:
         return cv2pil(image.resize(new_size))
 
 
+def glossary_words(context: dict | None) -> list[str]:
+    """Target-language spellings in a chapter glossary (kept on one line by the renderer)."""
+    return [str(v).split(" (")[0].strip() for v in ((context or {}).get("glossary") or {}).values() if v]
+
+
 @dataclass
 class PageState:
     """One page moving through QualityPipeline (analyze -> translate_page -> finish)."""
@@ -334,7 +339,7 @@ class QualityPipeline(Pipeline):
         return results
 
     def finish(self, page: "PageState", results: list[TranslationResult], to_lang=None, font=None,
-               text_scale=None) -> Image.Image:
+               text_scale=None, keep_words=()) -> Image.Image:
         """Erase the translated regions (with guard) and letter them."""
         import time
         from manga_translator.utils.common import pil2cv
@@ -347,7 +352,8 @@ class QualityPipeline(Pipeline):
         page.lap("inpaint", t)
         t = time.perf_counter()
         rendered = self.renderer.render(erased.clean, results, lang=to_lang or self.to_lang, font=font,
-                                        text_scale=text_scale, original=page.image, glyph_masks=erased.masks)
+                                        text_scale=text_scale, original=page.image, glyph_masks=erased.masks,
+                                        keep_words=keep_words)
         page.lap("render", t)
         page.results, page.reverted, page.clean, page.rendered = results, erased.reverted, cv2pil(erased.clean), rendered
         return rendered
@@ -364,7 +370,8 @@ class QualityPipeline(Pipeline):
         results = await self.translate_page(page, chapter=chapter, provider=provider, api_key=api_key, model=model,
                                             from_lang=from_lang, to_lang=to_lang,
                                             custom_instruction=custom_instruction, capture=capture)
-        rendered = self.finish(page, results, to_lang=to_lang, font=font, text_scale=text_scale)
+        rendered = self.finish(page, results, to_lang=to_lang, font=font, text_scale=text_scale,
+                               keep_words=glossary_words((chapter or {}).get("context")))
         self.last_page = page.diagnostics()
         return upscale_image(rendered, factor=upscale or 1.0, method=upscaler or "lanczos", device=self.device)
 

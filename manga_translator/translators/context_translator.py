@@ -37,6 +37,23 @@ def _norm(t: str) -> str:
     return re.sub(r"[^a-z0-9぀-ヿ一-鿿]+", "", (t or "").lower())
 
 
+def similarity(a: str, b: str) -> float:
+    """0..1 similarity of two texts after normalisation (1 when either is empty)."""
+    a, b = _norm(a), _norm(b)
+    if not a or not b:
+        return 1.0
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def is_swap(n: int, source: str, ocr_texts: list[str]) -> bool:
+    """The model's source for tag n is clearly another region's text, not a reading of its own."""
+    own = similarity(ocr_texts[n], source)
+    if own >= 0.45:
+        return False
+    best = max((similarity(t, source) for m, t in enumerate(ocr_texts) if m != n and _norm(t)), default=0.0)
+    return best >= max(0.6, own + 0.2)  # short words share letters by chance ("BREATH" / "REALLY?")
+
+
 def same_text(ocr: str, source: str, thr: float = 0.45) -> bool:
     """True when the model's corrected source plausibly is this region's OCR text."""
     a, b = _norm(ocr), _norm(source)
@@ -102,28 +119,35 @@ class ContextTranslator:
             source = x.get("source") or o.text
             out.append(TranslationResult(ocr_result=o, translated_text=x.get("translation") or o.text,
                                          speaker=x.get("speaker") or "", source_text=source))
-            if raw and (not x or not same_text(o.text, source)):
+            # re-ask only a real swap (the source is another region's text): a source that differs
+            # from garbage OCR is the model reading the image correctly (ch.29: "DEE? eRenz" -> BREATH)
+            if raw and (not x or is_swap(n, source, [r.text for r in ocr_result])):
                 suspect.append(n)
         new_context = data.get("context") or context
+        respell = []
         if self.lock_glossary:
             new_context = merge_context(context, data.get("context") or {})
             gloss = new_context.get("glossary", {})
-            suspect += [n for n, r in enumerate(out) if n not in suspect and r.translated_text
-                        and r.translated_text != r.ocr_result.text
-                        and glossary_misses(f"{r.source_text or ''} {r.ocr_result.text}", r.translated_text, gloss)]
-        if suspect:
-            fixed = await self._reask(out, suspect, model, src, dst, new_context)
+            respell = [n for n, r in enumerate(out) if n not in suspect and r.translated_text
+                       and r.translated_text != r.ocr_result.text
+                       and glossary_misses(f"{r.source_text or ''} {r.ocr_result.text}", r.translated_text, gloss)]
+        # swaps are re-asked with the OCR text, spelling fixes with the model's own reading
+        texts = {n: out[n].ocr_result.text for n in suspect}
+        texts.update({n: out[n].source_text or out[n].ocr_result.text for n in respell})
+        if texts:
+            fixed = await self._reask(out, texts, model, src, dst, new_context)
             for n, t in fixed.items():
-                out[n].translated_text, out[n].source_text = t, out[n].ocr_result.text
+                out[n].translated_text, out[n].source_text = t, texts[n]
         if capture is not None:
             capture["parsed"] = {n: r.translated_text for n, r in enumerate(out)}
-            capture["reasked"] = suspect
+            capture["reasked"] = list(texts)
         return out, new_context
 
-    async def _reask(self, out, suspect, model, src, dst, context) -> dict[int, str]:
-        page = "\n".join(f"[{n}] ({r.speaker or '?'}) {r.ocr_result.text} => {r.translated_text}"
-                         for n, r in enumerate(out) if n not in suspect)
-        ask = "\n".join(f"[{n}] {out[n].ocr_result.text}" for n in suspect)
+    async def _reask(self, out, texts: dict[int, str], model, src, dst, context) -> dict[int, str]:
+        suspect = list(texts)
+        page = "\n".join(f"[{n}] ({r.speaker or '?'}) {r.source_text or r.ocr_result.text} => {r.translated_text}"
+                         for n, r in enumerate(out) if n not in texts)
+        ask = "\n".join(f"[{n}] {texts[n]}" for n in suspect)
         msg = CONTEXT_REASK_PROMPT.format(from_lang=src, to_lang=dst, page=page, ask=ask,
                                           context=json.dumps(context, ensure_ascii=False))
         try:
