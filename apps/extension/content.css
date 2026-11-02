@@ -1,0 +1,9 @@
+.mtvl-fab { position: fixed; right: 18px; bottom: 18px; z-index: 2147483646; display: flex; gap: 6px; align-items: center;
+  font: 600 13px/1 system-ui, sans-serif; }
+.mtvl-fab button { border: 0; border-radius: 999px; cursor: pointer; box-shadow: 0 4px 16px #0006; }
+.mtvl-go { background: #e2334a; color: #fff; padding: 12px 18px; font-size: 15px; }
+.mtvl-undo { background: #222; color: #eee; width: 36px; height: 36px; }
+.mtvl-msg { background: #000a; color: #fff; padding: 4px 8px; border-radius: 6px; }
+.mtvl-msg:empty { display: none; }
+.mtvl-badge { position: absolute; z-index: 2147483645; color: #fff; padding: 3px 8px; border-radius: 6px;
+  font: 600 12px/1.4 system-ui, sans-serif; pointer-events: none; }

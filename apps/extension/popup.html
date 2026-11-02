@@ -1,0 +1,40 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+ body { width: 300px; font: 13px/1.45 system-ui, sans-serif; margin: 12px; color: #222; }
+ h3 { margin: 0 0 8px; font-size: 15px; }
+ .row { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+ .dot { width: 9px; height: 9px; border-radius: 50%; background: #bbb; }
+ .ok { background: #2a2; } .bad { background: #c22; }
+ button { width: 100%; padding: 9px; margin: 4px 0; border: 0; border-radius: 8px; cursor: pointer; font-weight: 600; }
+ .primary { background: #e2334a; color: #fff; } .ghost { background: #eee; }
+ select, input { width: 100%; padding: 5px; box-sizing: border-box; margin: 2px 0; }
+ details { margin-top: 8px; } small { color: #666; }
+</style></head><body>
+ <h3>MangaTVL</h3>
+ <div class="row"><span id="d-backend" class="dot"></span><span id="t-backend">checking…</span></div>
+ <div class="row"><span id="d-llm" class="dot"></span><span id="t-llm"></span></div>
+ <a id="get-app" href="https://github.com/" target="_blank" hidden>⬇ ดาวน์โหลดแอป MangaTVL Companion (ติดตั้งครั้งเดียว)</a>
+
+ <button id="signin" class="primary">Sign in with OpenRouter (1 คลิก)</button>
+ <small>ไม่ต้อง copy API key — ล็อกอินแล้วระบบจะได้ key ให้อัตโนมัติ<br>ไม่มีบัญชี? ใช้ "Local AI" ในแอป Companion ได้ฟรี</small>
+
+ <label>แปลเป็น</label>
+ <select id="toLang"><option value="thai">ไทย</option><option value="english">English</option><option value="japanese">日本語</option></select>
+
+ <details><summary>ขั้นสูง</summary>
+  <label>AI ที่ใช้</label>
+  <select id="llmMode">
+   <option value="auto">อัตโนมัติ (แนะนำ)</option>
+   <option value="openrouter">OpenRouter</option>
+   <option value="gemini">Gemini key</option>
+   <option value="local">Local AI (ในแอป, ไม่ต้องมีบัญชี)</option>
+   <option value="builtin">Chrome built-in (ออฟไลน์, ไม่เข้าใจบริบทภาพ)</option>
+  </select>
+  <label>Gemini API key (ถ้ามี)</label><input id="geminiKey" type="password" placeholder="AIza…">
+  <label>Model (เว้นว่าง = ค่าเริ่มต้น)</label><input id="model">
+  <label>Relay server (ถ้าองค์กรมีให้)</label><input id="relayUrl" placeholder="https://…">
+  <label>คุณภาพ</label><select id="quality"><option value="best">ดีที่สุด (LaMa + typesetting)</option><option value="fast">เร็ว</option></select>
+  <button id="save" class="ghost">บันทึก</button>
+ </details>
+<script src="popup.js"></script>
+</body></html>

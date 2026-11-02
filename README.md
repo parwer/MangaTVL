@@ -40,16 +40,39 @@ The stages communicate through Pydantic models in [`manga_translator/schemas/int
 | OCR | EasyOCR / manga-ocr (Japanese) / PaddleOCR | [`ocr/`](manga_translator/ocr/) |
 | Translation | OpenRouter / Gemini / Groq VLM (async, text + image) | [`translators/`](manga_translator/translators/) |
 | Inpainting | OpenCV / Simple-LaMa | [`inpainting/`](manga_translator/inpainting/) |
-| Rendering | Pillow + language-aware line-breaking (pythainlp / per-char / spaces) | [`rendering/renderer.py`](manga_translator/rendering/renderer.py) |
+| Rendering | balloon-shape-aware layout, HarfBuzz shaping (Thai marks), page-level size planning | [`rendering/`](manga_translator/rendering/) |
 | Serving | FastAPI | [`main.py`](main.py) |
+
+### Quality mode (`QualityPipeline`)
+
+`QualityPipeline` (same API, `QUALITY=1` for `main.py`) works on the letters instead of boxes:
+
+```
+detect (balloons + free text: HybridDetection)
+  → glyph mask (masking.TextMasker, comic-text-detector) → region repairs (detection/refine.py)
+  → OCR without double reads (ocr/region_ocr.py)
+  → page translation with numbered tags, speakers and a running chapter context (translators.ContextTranslator)
+  → erase only the lettering: flat fill or LaMa, verify / repair, revert regions that stay dirty (inpainting.TextEraser)
+  → letter with the original glyph masks (rendering.TextRenderer)
+```
+`run_batch` / `run_batch_stream` treat the images as one chapter in reading order (pages run one after another
+so each gets the context of the previous ones). It needs the model files below and a GPU (or DirectML) to be fast.
 
 ---
 
 ## Requirements
 
 - **Python 3.12** (the project ships with an embedded interpreter at `../MangaTVL_ENV/python.exe`)
-- A detection model weight under `manga_translator/assets/models/` (e.g. `best_diplom.pt` for `YoloDetection`, or a `.onnx` for `ONNXDetection`) — model weights are **not** committed
-- A Thai font at `manga_translator/assets/fonts/THSarabunNew.ttf`
+- Model files under `manga_translator/assets/models/` (**not** committed):
+
+  | file | used by |
+  |---|---|
+  | `best_diplom.pt` (or `.onnx`) | balloon detector (all modes) |
+  | `bubble_freetext_yolo26s.pt` (or `.onnx`) | free-text detector (`FREE_TEXT_MODEL=default`, quality mode) |
+  | `comictextdetector.pt.onnx` | glyph mask (quality mode) |
+  | `lama_ft2.pt` (or `lama_large_512px.ckpt`), `lama_ft2_512.onnx` | LaMa text eraser (quality mode; ONNX for the packaged app) |
+  | `baberu/` | Japanese OCR without torch (packaged app) |
+- Fonts are in `manga_translator/assets/fonts/` (Thai default: Mali Medium / Bold)
 - One LLM provider API key (see Configuration)
 
 > `requirement.txt` is incomplete. Expect to also install: `fastapi`, `uvicorn`, `python-dotenv`, `beautifulsoup4`, `requests`, `pillow`, `tqdm`, `pythainlp`, `ultralytics`, `simple-lama-inpainting`, and the LLM SDKs (`openai`, `groq`, `google-genai`).
@@ -77,6 +100,8 @@ DEVICE=cpu                       # cpu | cuda
 PROVIDER=openrouter              # openrouter | gemini | groq
 MODEL=google/gemini-3-flash-preview
 CONCURRENT_REQUESTS=4            # max concurrent LLM calls
+FREE_TEXT_MODEL=default          # optional: also detect free text (asides, captions, SFX)
+QUALITY=1                        # optional: QualityPipeline (glyph masks, LaMa, chapter context)
 ```
 
 `main.py` reads `DEVICE`/`PROVIDER`/`MODEL` from the environment, so the same image runs on CPU or GPU without code changes.
@@ -239,6 +264,43 @@ result.save("translated.jpg")
 
 ---
 
+## Browser extension + companion app (no API key for the user)
+
+[`apps/`](apps/) is the end-user client: a Chrome MV3 extension (one button on any reader page) and a local
+companion app that runs `QualityPipeline` on the user's GPU.
+
+```powershell
+python -m apps.companion.server          # http://127.0.0.1:8765, accepts requests from extensions only
+# Chrome -> chrome://extensions -> Developer mode -> Load unpacked -> apps/extension
+```
+Translation tiers, picked automatically by the extension: the owner's relay (no account), Sign in with
+OpenRouter (OAuth PKCE, one click), a Gemini key, a local model (Ollama), or Chrome's on-device Translator
+(the companion OCRs and erases; the extension translates; `/v1/render` letters the result).
+Companion endpoints: `GET /v1/health`, `POST /v1/translate`, `POST /v1/render`, `GET /oauth/callback`, `GET /oauth/code`.
+
+The relay ([`apps/relay/relay.py`](apps/relay/relay.py)) is a small FastAPI app the owner hosts with their
+provider key (`OWNER_OPENROUTER_KEY`): anonymous device tokens, a daily page quota, OpenAI-compatible pass-through.
+
+### Packaged app (no PyTorch, any Windows GPU)
+
+```powershell
+python packaging/stage.py --clean                       # -> packaging/build/app (code + ONNX models)
+<torch-free venv>\python packaging/smoke_torchfree.py page.png   # full page, asserts torch is absent
+<torch-free venv>\python packaging/build_exe.py         # -> packaging/dist/MangaTVL-Companion/
+```
+The torch-free venv has `onnxruntime-directml opencv-python-headless pillow pydantic fastapi uvicorn requests
+openai python-dotenv pythainlp uharfbuzz freetype-py rapidocr pyinstaller`. Without torch the pipeline uses
+ONNX detection, ONNX LaMa, RapidOCR (Baberu for Japanese) and DirectML.
+
+---
+
+## Training
+
+[`training/`](training/README.md): the free-text YOLO26 detector (dataset merge, training, evaluation) and the
+LaMa fine-tune (synthetic lettering, training, ONNX export).
+
+---
+
 ## Scraping an evaluation set
 
 [`scrape_images.py`](scrape_images.py) collects page images into a folder so you can build a test set for the translator. It drives a real (headless) browser via **Playwright**, scrolls to trigger lazy-loading, grabs `<img>`s ≥ `--min-width` in reading order, and downloads them through the browser session (cookies + referer) to get past hotlink protection. SVG/non-raster images are skipped.
@@ -263,18 +325,22 @@ Options: `--out` (default `eval/scraped`), `--min-width` (default 400), `--selec
 
 ```
 MangaTVL/
-├── main.py                     # FastAPI app
-├── pipeline.py                 # Pipeline orchestrator (the 5 stages)
+├── main.py                     # FastAPI app (hosted API, userscript client)
+├── pipeline.py                 # Pipeline + QualityPipeline orchestrators
 ├── manga_translator/
-│   ├── detection/              # ONNXDetection, YoloDetection (DetectorBase)
-│   ├── ocr/                    # PaddleOCREngine, EasyOCREngine, clean_poly
-│   ├── translators/            # OpenRouter / Gemini / Groq (AsyncTranslatorBase)
-│   ├── inpainting/             # OpenCV / Simple-LaMa (InpainterBase)
-│   ├── rendering/              # TextRenderer
+│   ├── detection/              # YOLO / ONNX detectors, HybridDetection, refine.py (region repairs)
+│   ├── masking/                # TextMasker (glyph mask), per-region glyph masks
+│   ├── ocr/                    # EasyOCR, manga-ocr, PaddleOCR, RapidOCR, Baberu, region_ocr.py
+│   ├── translators/            # OpenRouter / Gemini / Groq, ContextTranslator
+│   ├── inpainting/             # OpenCV / Simple-LaMa / LaMa (own arch), TextEraser
+│   ├── rendering/              # TextRenderer, typeset, HarfBuzz shaper, fonts
 │   ├── schemas/interface.py    # DetectionResult / OCRResult / TranslationResult
-│   ├── utils/common.py         # image + geometry helpers
-│   └── assets/                 # fonts, models, sample images
-└── tests/                      # pytest suite (pure-logic unit tests)
+│   ├── utils/                  # image + geometry helpers, languages
+│   └── assets/                 # fonts, models (not committed)
+├── apps/                       # extension, companion app, relay
+├── packaging/                  # torch-free companion build
+├── training/                   # YOLO + LaMa training scripts
+└── tests/                      # pytest suite (no model files or API keys needed)
 ```
 
 ---
