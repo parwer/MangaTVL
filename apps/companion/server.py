@@ -21,6 +21,10 @@ from pipeline import QualityPipeline  # noqa: E402
 from manga_translator.schemas.interface import TranslationResult  # noqa: E402
 
 VERSION = "0.2.0"
+MODEL = os.getenv("MODEL") or "google/gemini-3-flash-preview"
+# MTVL_DEVICE, not DEVICE: the repo .env sets DEVICE=cpu for main.py, which put the companion's
+# glyph mask and LaMa on the CPU (minutes per page, the whole PC froze)
+DEVICE = os.getenv("MTVL_DEVICE")
 app = FastAPI(title="MangaTVL Companion")
 app.add_middleware(CORSMiddleware, allow_origin_regex=r"^chrome-extension://[a-p]{32}$|^moz-extension://.*$",
                    allow_methods=["*"], allow_headers=["*"])
@@ -52,16 +56,15 @@ def pipe() -> QualityPipeline:
     if PIPE is None:
         try:
             import torch
-            device = os.getenv("DEVICE") or ("cuda" if torch.cuda.is_available() else "cpu")
-            PIPE = QualityPipeline(provider="openrouter", device=device)
+            device = DEVICE or ("cuda" if torch.cuda.is_available() else "cpu")
+            PIPE = QualityPipeline(provider="openrouter", model=MODEL, device=device)
         except ImportError:  # packaged app: onnxruntime only
             from manga_translator.detection import build_detector
             models = REPO / "manga_translator" / "assets" / "models"
-            device = os.getenv("DEVICE", "dml")
-            # DirectML only for the fixed-shape models (CTD 1024, LaMa 512): the detectors' input
-            # size changes per page and DirectML recompiles per shape; on CPU they take ~0.25 s
+            device = DEVICE or "dml"
+            # detectors on CPU (0.22 s); on DirectML each new page size recompiles (0.55 s)
             det = build_detector(models / "best_diplom.onnx", models / "bubble_freetext_yolo26s.onnx", device="cpu")
-            PIPE = QualityPipeline(provider="openrouter", device=device, det_model=det,
+            PIPE = QualityPipeline(provider="openrouter", model=MODEL, device=device, det_model=det,
                                    lama_onnx=models / "lama_ft2_512.onnx")
     return PIPE
 
@@ -101,7 +104,9 @@ def translator_for(provider: str, api_key: str | None, model: str | None):
         base, default = OPENAI_COMPATIBLE[provider]
         client = AsyncOpenAI(base_url=base, api_key=api_key or "none")
         return AsyncOpenRouterTranslator(client=client, model=model or default)
-    return pipe()._get_translator(provider, pipe()._resolve_key(provider, api_key))
+    tr = pipe()._get_translator(provider, pipe()._resolve_key(provider, api_key))
+    tr.model = tr.model or MODEL
+    return tr
 
 
 def decode(data_url: str) -> Image.Image:

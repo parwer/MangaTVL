@@ -46,9 +46,8 @@ class RapidOCREngine(OCREngine):
         super().__init__(backend="rapidocr")
         from rapidocr import LangRec, ModelType, OCRVersion, RapidOCR
         self.eng = RapidOCR(params={
-            # CPU even when DirectML exists: every crop has a new input size and DirectML recompiles
-            # its GPU graph per shape (suspected cause of multi-second desktop freezes)
-            "EngineConfig.onnxruntime.use_dml": False,
+            # DirectML: 0.2-0.4 s per crop vs 2-3 s on CPU (packaging/bench_dml.py)
+            "EngineConfig.onnxruntime.use_dml": device == "dml",
             "Rec.lang_type": getattr(LangRec, LANGS.get(language, "EN")),
             "Rec.ocr_version": OCRVersion.PPOCRV5, "Rec.model_type": ModelType.MOBILE,
             "Global.log_level": "error",
