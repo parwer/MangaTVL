@@ -203,15 +203,15 @@ def layout(text, lang, area, center, font_path, max_size, min_size=11):
     if not tokens:
         return None
     cx, cy = center
-    ys, xs = np.nonzero(area)
-    if len(xs) == 0:
+    _, ay, aw, ah = cv2.boundingRect(area)
+    if aw == 0:
         return None
     for size in range(max_size, min_size - 1, -1 if max_size - min_size < 24 else -2):
         f = _font(str(font_path), size)
         # Thai stacks marks above (่ ้ ี้) and below (ุ ู) the line box -> extra leading
         line_h = int(f.line_height * (1.22 if canonical_name(lang) == "thai" else 0.95))
         meas = f.measure
-        max_lines = max(1, (ys.max() - ys.min()) // line_h)
+        max_lines = max(1, (ah - 1) // line_h)
         for k in range(1, min(max_lines, len(tokens)) + 1):
             top = int(cy - k * line_h / 2)
             inset = int(line_h * 0.18)  # marks/leading may touch the edge; glyph bodies may not
@@ -229,10 +229,10 @@ def render_region(img: Image.Image, text: str, lang: str, area: np.ndarray, cent
                   font_path, max_size=None, min_size: int = 11, ss: int = 3, dry_run: bool = False):
     """Typeset one region (dry_run: only return the best-fit font size)."""
     font_path = Path(font_path)
-    ys, xs = np.nonzero(area)
-    if len(xs) == 0:
+    bx, by, bw, bh = cv2.boundingRect(area)
+    if bw == 0:
         return False
-    max_size = max_size or int(np.clip((ys.max() - ys.min()) * 0.45, 14, 80))
+    max_size = max_size or int(np.clip((bh - 1) * 0.45, 14, 80))
     # snap the anchor inside the area (nearest high-clearance point)
     cx, cy = int(center[0]), int(center[1])
     if area[np.clip(cy, 0, area.shape[0] - 1), np.clip(cx, 0, area.shape[1] - 1)] == 0:
@@ -253,7 +253,7 @@ def render_region(img: Image.Image, text: str, lang: str, area: np.ndarray, cent
     size, lines, line_h, top = res
     if dry_run:
         return size
-    x0, y0, x1, y1 = xs.min(), ys.min(), xs.max(), ys.max()
+    x0, y0, x1, y1 = bx, by, bx + bw - 1, by + bh - 1
     pad = size
     W, H = (x1 - x0 + 2 * pad), (y1 - y0 + 2 * pad)
     f = _font(str(font_path), size * ss)

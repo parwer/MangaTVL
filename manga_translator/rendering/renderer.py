@@ -24,12 +24,23 @@ def _poly_mask(polygon, shape, grow: int = 0) -> np.ndarray | None:
     return m
 
 
-def _union_except(masks, keep, i) -> np.ndarray:
-    out = np.zeros_like(masks[i])
+def _others(masks, keep):
+    """f(i) -> union of the masks of the regions in ``keep`` other than i (counts computed once)."""
+    claims = np.zeros(masks[0].shape, np.int16) if masks else None
     for j in keep:
-        if j != i:
-            out |= masks[j]
-    return out
+        claims += masks[j] > 0
+    keep = set(keep)
+
+    def union_except(i):
+        own = (masks[i] > 0) if i in keep else 0
+        return ((claims - own) > 0).astype(np.uint8) * 255
+    return union_except
+
+
+def _extent(mask):
+    """(x0, y0, x1, y1) of the non-zero pixels, or None."""
+    x, y, w, h = cv2.boundingRect(mask)
+    return (x, y, x + w - 1, y + h - 1) if w else None
 
 
 def estimate_glyph_masks(original_bgr, clean_bgr, items, thresh: int = 40) -> list[np.ndarray]:
@@ -105,18 +116,17 @@ class TextRenderer:
         max_cap = int(self.max_font_size * scale)
         min_size = self.min_font_size
         polys = {i: _poly_mask(dets[i].segmentation, (H, W), grow=-3) for i in keep}
+        union_except = _others(gms, keep) if gms else None
 
         def build_area(i, ms=1.0):
             d, gm = dets[i], gms[i]
             area = balloon_area(clean, d.bbox, d.segmentation, gm, margin_scale=ms)
-            if gm.any():  # the original lettering's footprint is always writable space
-                ys_, xs_ = np.nonzero(gm)
-                ays, axs = np.nonzero(area)
-                if (not len(axs) or (axs.max() - axs.min()) < 0.8 * (xs_.max() - xs_.min())
-                        or (ays.max() - ays.min()) < 0.8 * (ys_.max() - ys_.min())):
+            g, a = _extent(gm), _extent(area)
+            if g:  # the original lettering's footprint is always writable space
+                if not a or (a[2] - a[0]) < 0.8 * (g[2] - g[0]) or (a[3] - a[1]) < 0.8 * (g[3] - g[1]):
                     pts = cv2.findNonZero(cv2.dilate(gm, np.ones((7, 7), np.uint8)))
                     cv2.fillConvexPoly(area, cv2.convexHull(pts), 255)
-            block = cv2.dilate(_union_except(gms, keep, i), np.ones((11, 11), np.uint8))
+            block = cv2.dilate(union_except(i), np.ones((11, 11), np.uint8))
             if gm.any():  # own footprint stays writable even where it touches a neighbour's
                 own = np.zeros_like(gm)
                 cv2.fillConvexPoly(own, cv2.convexHull(cv2.findNonZero(gm)), 255)
@@ -136,8 +146,10 @@ class TextRenderer:
             if not area.any():
                 continue
             gm = gms[i]
-            ys, xs = np.nonzero(gm) if gm.any() else np.nonzero(area)
-            center = (int(np.median(xs)), int((ys.min() + ys.max()) / 2))
+            src = gm if gm.any() else area
+            x0, y0, x1, y1 = _extent(src)
+            ys, xs = np.nonzero(src[y0:y1 + 1, x0:x1 + 1])
+            center = (int(np.median(xs + x0)), int((ys.min() + ys.max()) / 2 + y0))
             style = detect_style(orig if orig is not None else clean, gm, clean, area)
             f = fit(i, area, center, style, max_cap)
             ref = float(np.median(fits)) if len(fits) >= 3 else None
@@ -152,7 +164,7 @@ class TextRenderer:
 
         bfits = [p[3] for i, p in plans.items() if p[3] and dets[i].form_type != "free_text"]
         if bfits:
-            self._grow_free_text(plans, dets, gms, keep, clean, float(np.median(bfits)),
+            self._grow_free_text(plans, dets, union_except, clean, float(np.median(bfits)),
                                  lambda i, a, c, s: fit(i, a, c, s, max_cap))
 
         # one dialogue size per page; emphasis relative to the original lettering size
@@ -181,7 +193,7 @@ class TextRenderer:
         return out.convert("RGB")
 
     @staticmethod
-    def _grow_free_text(plans, dets, gms, keep, clean, med, fit):
+    def _grow_free_text(plans, dets, union_except, clean, med, fit):
         """Free text squeezed far below dialogue size grows into the free space around it."""
         H, W = clean.shape[:2]
         balloons = np.zeros((H, W), np.uint8)
@@ -203,7 +215,7 @@ class TextRenderer:
             gx, gy = int(0.35 * (x2 - x1)) + 8, int(0.25 * (y2 - y1)) + 8
             grown = np.zeros_like(area)
             grown[max(0, y1 - gy):y2 + gy, max(0, x1 - gx):x2 + gx] = 255
-            grown &= ~balloons & ~cv2.dilate(_union_except(gms, keep, i), np.ones((11, 11), np.uint8))
+            grown &= ~balloons & ~cv2.dilate(union_except(i), np.ones((11, 11), np.uint8))
             grown |= area
             f3 = fit(i, grown, center, style)
             if f3 is not None and (f is None or f3 > f):
