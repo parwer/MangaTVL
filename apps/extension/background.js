@@ -13,6 +13,7 @@ const DEFAULTS = {
   openrouterKey: "",
   geminiKey: "",
   model: "",                // blank = backend default for the chosen provider
+  localUrl: "",             // Local AI: OpenAI-compatible server; blank = Ollama (http://127.0.0.1:11434/v1)
   toLang: "thai",
   fromLang: "auto",
   relayUrl: "",             // optional hosted relay (see docs/p1-easy-access.md, tier C)
@@ -102,8 +103,10 @@ function llmConfig(s, backendInfo) {
   if ((mode === "gemini" || mode === "auto") && s.geminiKey)
     return { provider: "gemini", api_key: s.geminiKey, model: s.model || null };
   if (mode === "builtin") return { provider: "builtin" }; // Chrome on-device Translator, done in content.js
+  const local = { provider: "local", model: s.model || null, base_url: s.localUrl || null };
+  if (mode === "local" || (mode === "auto" && s.localUrl)) return local; // the user's own server
   if (mode === "auto" && backendInfo && backendInfo.relay) return { provider: "relay" }; // free daily quota, no account
-  if (backendInfo && backendInfo.local_llm) return { provider: "local", model: s.model || null };
+  if (backendInfo && backendInfo.local_llm) return local;
   return { provider: "none" };
 }
 
@@ -188,6 +191,12 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       if (msg.type === "analyze") return reply(await analyzePage(msg));
       if (msg.type === "job") return reply(await translateJob(msg));
       if (msg.type === "result") return reply(await jobResult(msg));
+      if (msg.type === "local-models") { // popup: does the Local AI URL answer, and with which models
+        const b = await findBackend(await getSettings());
+        if (!b) return reply({ ok: false, error: "no-backend" });
+        const q = msg.url ? `?url=${encodeURIComponent(msg.url)}` : "";
+        return reply(await call(b, `/v1/local-models${q}`));
+      }
       if (msg.type === "settings") return reply(await getSettings().then((s) => ({ contextMode: s.contextMode, llmMode: s.llmMode, toLang: s.toLang })));
       if (msg.type === "render") { // second half of the "builtin" flow
         const b = await findBackend(await getSettings());

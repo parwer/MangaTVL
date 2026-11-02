@@ -123,3 +123,21 @@ def test_fast_quality_reaches_the_page(monkeypatch):
     for q, fast in (("fast", True), ("best", False)):
         a = c.post("/v1/analyze", json={"image": data_url(), "quality": q}, headers=EXT).json()
         assert srv.JOBS[a["job"]]["page"].fast is fast
+
+
+def test_local_ai_url_points_at_another_openai_compatible_server(monkeypatch):
+    monkeypatch.setattr(srv, "local_models", lambda base: ["gemma-4-26b-a4b-it", "other"])
+    tr = srv.translator_for("local", None, None, "http://127.0.0.1:1234/v1/")   # LM Studio
+    assert str(tr.client.base_url).rstrip("/") == "http://127.0.0.1:1234/v1" and tr.model == "gemma-4-26b-a4b-it"
+    assert srv.translator_for("local", None, "picked", "http://127.0.0.1:1234/v1").model == "picked"
+    ollama = srv.translator_for("local", None, None)                             # blank URL: Ollama default
+    assert "11434" in str(ollama.client.base_url) and ollama.model == "qwen3-vl:4b-instruct"
+
+
+def test_local_models_endpoint_reports_an_unreachable_server(monkeypatch):
+    c, _ = client(monkeypatch, [])
+    def down(base):
+        raise ConnectionError("refused")
+    monkeypatch.setattr(srv, "local_models", down)
+    r = c.get("/v1/local-models", params={"url": "http://127.0.0.1:1234/v1"}, headers=EXT).json()
+    assert r == {"ok": False, "error": "refused", "models": []}

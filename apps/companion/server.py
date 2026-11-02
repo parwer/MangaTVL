@@ -74,7 +74,7 @@ RELAY_URL = os.getenv("MTVL_RELAY_URL", "http://127.0.0.1:8787")
 TOKEN_FILE = Path(os.getenv("APPDATA", str(REPO))) / "MangaTVL" / "relay_token.txt"
 OPENAI_COMPATIBLE = {  # provider -> (base url, default model)
     "relay": (RELAY_URL + "/v1", "google/gemini-2.5-flash-lite"),
-    "local": ("http://127.0.0.1:11434/v1", "qwen3-vl:4b-instruct"),  # Ollama
+    "local": ("http://127.0.0.1:11434/v1", "qwen3-vl:4b-instruct"),  # Ollama; any other URL from the popup
 }
 
 
@@ -133,12 +133,23 @@ def relay_ok() -> bool:
         return False
 
 
-def translator_for(provider: str, api_key: str | None, model: str | None):
+def local_models(base_url: str) -> list[str]:
+    """Model ids served by an OpenAI-compatible server (Ollama, LM Studio, llama.cpp, vLLM...)."""
+    r = requests.get(base_url.rstrip("/") + "/models", timeout=3)
+    r.raise_for_status()
+    return [m["id"] for m in r.json().get("data", [])]
+
+
+def translator_for(provider: str, api_key: str | None, model: str | None, base_url: str | None = None):
     """A translator for the provider; relay / local are OpenAI-compatible endpoints."""
     if provider in OPENAI_COMPATIBLE:
         from openai import AsyncOpenAI
         from manga_translator.translators import AsyncOpenRouterTranslator
         base, default = OPENAI_COMPATIBLE[provider]
+        if provider == "local" and base_url and base_url.rstrip("/") != base:
+            base = base_url.rstrip("/")
+            if not model:  # another server: one of its own models (the Ollama default would not exist there)
+                model = (local_models(base) or [None])[0]
         client = AsyncOpenAI(base_url=base, api_key=api_key or "none")
         return AsyncOpenRouterTranslator(client=client, model=model or default)
     tr = pipe()._get_translator(provider, pipe()._resolve_key(provider, api_key))
@@ -160,6 +171,7 @@ class LLM(BaseModel):
     provider: str = "none"
     api_key: str | None = None
     model: str | None = None
+    base_url: str | None = None  # local: OpenAI-compatible server, e.g. LM Studio http://127.0.0.1:1234/v1
 
 
 class TranslateReq(BaseModel):
@@ -247,7 +259,8 @@ async def _translate_job(job: dict, llm: LLM, context: dict | None) -> dict:
         return {"needs_client_translation": True, "context": context}
     chapter = {"context": context}
     try:
-        results = await pipe().translate_page(page, translator_for(prov, key, llm.model), chapter=chapter,
+        tr = translator_for(prov, key, llm.model, llm.base_url)
+        results = await pipe().translate_page(page, tr, chapter=chapter,
                                               model=llm.model, from_lang=job["src"], to_lang=job["to_lang"].title())
     except Exception as e:  # provider errors (bad key, quota) go to the badge
         if prov == "relay" and "429" in str(e):
@@ -314,6 +327,15 @@ def oauth_callback(code: str, state: str = "", path_state: str = ""):
     # OpenRouter does not promise to echo `state`; the extension also puts it in the path
     OAUTH[path_state or state] = code
     return "<h3>เชื่อมต่อ OpenRouter สำเร็จ — ปิดแท็บนี้ได้เลย</h3><script>setTimeout(()=>window.close(),1500)</script>"
+
+
+@app.get("/v1/local-models")
+def list_local_models(url: str = OPENAI_COMPATIBLE["local"][0]):
+    """What a local OpenAI-compatible server offers (popup check before translating)."""
+    try:
+        return {"ok": True, "models": local_models(url)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200], "models": []}
 
 
 @app.get("/oauth/code")

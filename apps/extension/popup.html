@@ -39,6 +39,9 @@
    <option value="builtin">Chrome built-in (ออฟไลน์, ไม่เข้าใจบริบทภาพ)</option>
   </select>
   <label>Gemini API key (ถ้ามี)</label><input id="geminiKey" type="password" placeholder="AIza…">
+  <label>Local AI URL (Ollama / LM Studio / server แบบ OpenAI-compatible)</label>
+  <input id="localUrl" placeholder="เว้นว่าง = Ollama http://127.0.0.1:11434/v1 · LM Studio http://127.0.0.1:1234/v1">
+  <button id="checkLocal" class="ghost">ตรวจ Local AI</button><small id="localInfo"></small>
   <label>Model (เว้นว่าง = ค่าเริ่มต้น)</label><input id="model">
   <label>Relay server (ถ้าองค์กรมีให้)</label><input id="relayUrl" placeholder="https://…">
   <label>คุณภาพ</label><select id="quality"><option value="best">ดีที่สุด (LaMa + typesetting)</option><option value="fast">เร็ว (ไม่ใช้ LaMa และตัวกรอง SFX ญี่ปุ่น)</option></select>
