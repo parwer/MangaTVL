@@ -58,7 +58,9 @@ def pipe() -> QualityPipeline:
             from manga_translator.detection import build_detector
             models = REPO / "manga_translator" / "assets" / "models"
             device = os.getenv("DEVICE", "dml")
-            det = build_detector(models / "best_diplom.onnx", models / "bubble_freetext_yolo26s.onnx", device=device)
+            # DirectML only for the fixed-shape models (CTD 1024, LaMa 512): the detectors' input
+            # size changes per page and DirectML recompiles per shape; on CPU they take ~0.25 s
+            det = build_detector(models / "best_diplom.onnx", models / "bubble_freetext_yolo26s.onnx", device="cpu")
             PIPE = QualityPipeline(provider="openrouter", device=device, det_model=det,
                                    lama_onnx=models / "lama_ft2_512.onnx")
     return PIPE
