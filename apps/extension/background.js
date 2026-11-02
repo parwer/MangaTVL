@@ -18,6 +18,7 @@ const DEFAULTS = {
   relayUrl: "",             // optional hosted relay (see docs/p1-easy-access.md, tier C)
   relayToken: "",
   quality: "best",          // best | fast
+  contextMode: "chapter",   // chapter: story context page to page | page: each page on its own, in parallel
 };
 
 async function getSettings() {
@@ -75,7 +76,7 @@ async function findBackend(settings) {
   if (cachedBackend) return cachedBackend;
   for (const base of COMPANION_URLS) {
     try {
-      const r = await fetch(`${base}/v1/health`, { signal: AbortSignal.timeout(800) });
+      const r = await fetch(`${base}/v1/health`, { signal: AbortSignal.timeout(3000) });
       if (r.ok) {
         const info = await r.json();
         cachedBackend = { kind: "companion", base, info };
@@ -113,22 +114,53 @@ async function blobToDataURL(blob) {
   return `data:${blob.type || "image/jpeg"};base64,${btoa(bin)}`;
 }
 
+async function pageImage(src, dataUrl, pageUrl) {
+  if (dataUrl) return dataUrl;
+  const r = await fetch(src, { referrer: pageUrl, credentials: "include" });
+  if (!r.ok) throw new Error(`image fetch HTTP ${r.status}`);
+  return blobToDataURL(await r.blob());
+}
+
+async function call(backend, path, body) {
+  const headers = { "Content-Type": "application/json" };
+  const r = await fetch(`${backend.base}${path}`, body ? { method: "POST", headers, body: JSON.stringify(body) } : {});
+  if (!r.ok) {
+    let detail = (await r.text()).slice(0, 300);
+    try { detail = JSON.parse(detail).detail || detail; } catch (_) {}
+    return { error: r.status === 429 ? detail : `backend HTTP ${r.status}: ${detail}`, quota: r.status === 429 };
+  }
+  return r.json();
+}
+
+// Companion jobs: analyze (GPU) -> job (LLM, returns the context at once) -> result (lettered page).
+// Split so the page can analyse page N+1 and letter page N while the LLM works on another page.
+async function analyzePage({ src, dataUrl, pageUrl }) {
+  const s = await getSettings();
+  const backend = await findBackend(s);
+  if (!backend) return { error: "no-backend" };
+  if (backend.kind !== "companion" || !backend.info.jobs) return { error: "old-backend" };
+  return call(backend, "/v1/analyze", { image: await pageImage(src, dataUrl, pageUrl), from_lang: s.fromLang, to_lang: s.toLang });
+}
+
+async function translateJob({ job, context }) {
+  const s = await getSettings();
+  const backend = await findBackend(s);
+  return call(backend, "/v1/job", { job, llm: llmConfig(s, backend.info), context: context || null });
+}
+
+async function jobResult({ job }) {
+  return call(await findBackend(await getSettings()), `/v1/result/${job}`);
+}
+
 async function translateImage({ src, dataUrl, pageUrl, prevContext }) {
   const s = await getSettings();
   const backend = await findBackend(s);
   if (!backend) return { error: "no-backend" };
-
-  let image = dataUrl;
-  if (!image) {
-    const r = await fetch(src, { referrer: pageUrl, credentials: "include" });
-    if (!r.ok) return { error: `image fetch HTTP ${r.status}` };
-    image = await blobToDataURL(await r.blob());
-  }
   const llm = llmConfig(s, backend.info);
   const headers = { "Content-Type": "application/json" };
   if (backend.kind === "relay" && s.relayToken) headers.Authorization = `Bearer ${s.relayToken}`;
   const body = {
-    image, page_url: pageUrl, from_lang: s.fromLang, to_lang: s.toLang,
+    image: await pageImage(src, dataUrl, pageUrl), page_url: pageUrl, from_lang: s.fromLang, to_lang: s.toLang,
     quality: s.quality, llm, context: prevContext || null,
   };
   const r = await fetch(`${backend.base}/v1/translate`, { method: "POST", headers, body: JSON.stringify(body) });
@@ -152,6 +184,10 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         return reply({ backend: b, llm: llmConfig(s, b && b.info).provider, settings: { ...s, openrouterKey: s.openrouterKey ? "•••" : "", geminiKey: s.geminiKey ? "•••" : "" } });
       }
       if (msg.type === "translate") return reply(await translateImage(msg));
+      if (msg.type === "analyze") return reply(await analyzePage(msg));
+      if (msg.type === "job") return reply(await translateJob(msg));
+      if (msg.type === "result") return reply(await jobResult(msg));
+      if (msg.type === "settings") return reply(await getSettings().then((s) => ({ contextMode: s.contextMode })));
       if (msg.type === "render") { // second half of the "builtin" flow
         const b = await findBackend(await getSettings());
         const r = await fetch(`${b.base}/v1/render`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(msg.payload) });

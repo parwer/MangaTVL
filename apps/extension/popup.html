@@ -21,6 +21,12 @@
  <label>แปลเป็น</label>
  <select id="toLang"><option value="thai">ไทย</option><option value="english">English</option><option value="japanese">日本語</option></select>
 
+ <label>วิธีแปล</label>
+ <select id="contextMode">
+  <option value="chapter">อิงเนื้อเรื่อง (ส่ง context หน้าต่อหน้า ชื่อและสำนวนสม่ำเสมอ)</option>
+  <option value="page">แยกหน้า (ไม่ใช้ context แปลหลายหน้าพร้อมกัน เร็วกว่า)</option>
+ </select>
+
  <details><summary>ขั้นสูง</summary>
   <label>AI ที่ใช้</label>
   <select id="llmMode">

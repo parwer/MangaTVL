@@ -341,6 +341,10 @@ class QualityPipeline(Pipeline):
     def finish(self, page: "PageState", results: list[TranslationResult], to_lang=None, font=None,
                text_scale=None, keep_words=()) -> Image.Image:
         """Erase the translated regions (with guard) and letter them."""
+        return self.letter(page, self.erase(page, results), to_lang, font, text_scale, keep_words)
+
+    def erase(self, page: "PageState", results: list[TranslationResult]):
+        """Erase the translated regions (GPU); regions whose text survives are reverted and left unlettered."""
         import time
         from manga_translator.utils.common import pil2cv
 
@@ -350,12 +354,20 @@ class QualityPipeline(Pipeline):
         for i, _ in erased.reverted:  # text survived erasing: original pixels are back, don't letter
             results[i].translated_text = ""
         page.lap("inpaint", t)
+        page.results, page.reverted = results, erased.reverted
+        return erased
+
+    def letter(self, page: "PageState", erased, to_lang=None, font=None, text_scale=None,
+               keep_words=()) -> Image.Image:
+        """Letter the translations onto the erased page (CPU only)."""
+        import time
+
         t = time.perf_counter()
-        rendered = self.renderer.render(erased.clean, results, lang=to_lang or self.to_lang, font=font,
+        rendered = self.renderer.render(erased.clean, page.results, lang=to_lang or self.to_lang, font=font,
                                         text_scale=text_scale, original=page.image, glyph_masks=erased.masks,
                                         keep_words=keep_words)
         page.lap("render", t)
-        page.results, page.reverted, page.clean, page.rendered = results, erased.reverted, cv2pil(erased.clean), rendered
+        page.clean, page.rendered = cv2pil(erased.clean), rendered
         return rendered
 
     async def _run_on_image(self, image: Image.Image, process_image: bool = False, *,

@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const FIELDS = ["toLang", "llmMode", "model", "relayUrl", "quality"];
+const FIELDS = ["toLang", "contextMode", "llmMode", "model", "relayUrl", "quality"];
 
 async function refresh() {
   const st = await chrome.runtime.sendMessage({ type: "status" });
@@ -27,4 +27,5 @@ $("save").onclick = async () => {
   refresh();
 };
 $("toLang").onchange = () => chrome.storage.local.set({ toLang: $("toLang").value });
+$("contextMode").onchange = () => chrome.storage.local.set({ contextMode: $("contextMode").value });
 refresh();

@@ -1,22 +1,26 @@
-// MangaTVL — content script: one floating button, translate pages in reading
-// order, carry a running "story context" from page to page so names/tone stay
-// consistent across a chapter, swap images in place, revert on demand.
+// MangaTVL — content script: one floating button. Once on, every manga page on the tab is
+// translated as it loads (lazy readers too) until stopped. Chapter mode carries the story
+// context page to page; page mode translates pages on their own, several at a time.
 (() => {
   if (window.__mtvl) return; window.__mtvl = true;
   const MIN_W = 380;
+  const LOOKAHEAD = 3;   // pages analysed ahead of the one being translated
+  const PARALLEL = 4;    // page mode: LLM calls at once
   const originals = new Map(); // img -> original src
-  let storyContext = null;      // returned by backend, fed to next page
-  let busy = false;
+  const queued = new Set();
+  let storyContext = null;      // chapter mode: returned by the backend, fed to the next page
+  let on = false, mode = "chapter", done = 0, failed = 0;
 
   const fab = document.createElement("div");
   fab.className = "mtvl-fab";
   fab.innerHTML = `<button class="mtvl-go" title="Translate pages">แปล</button><button class="mtvl-undo" title="Revert">↺</button><span class="mtvl-msg"></span>`;
   document.documentElement.appendChild(fab);
+  const go = fab.querySelector(".mtvl-go");
   const msg = (t) => (fab.querySelector(".mtvl-msg").textContent = t || "");
+  const send = (m) => chrome.runtime.sendMessage(m).catch((e) => ({ error: String(e) }));
 
-  const pages = () => [...document.images]
-    .filter((im) => im.naturalWidth >= MIN_W && im.getBoundingClientRect().width >= MIN_W * 0.5)
-    .sort((a, b) => (a.getBoundingClientRect().top + scrollY) - (b.getBoundingClientRect().top + scrollY));
+  const isPage = (im) => im.complete && im.naturalWidth >= MIN_W && im.getBoundingClientRect().width >= MIN_W * 0.5;
+  const top = (im) => im.getBoundingClientRect().top + scrollY;
 
   function badge(img, text, color) {
     let b = img.__mtvlBadge;
@@ -42,7 +46,6 @@
   }
 
   // Chrome built-in on-device Translator (no account, no key, offline).
-  // Used only when the user picks "builtin" or nothing else is available.
   async function builtinTranslate(texts, from, to) {
     if (!("Translator" in self)) throw new Error("Chrome built-in Translator API not available");
     const iso = { thai: "th", english: "en", japanese: "ja", korean: "ko", chinese: "zh" };
@@ -50,59 +53,145 @@
     return Promise.all(texts.map((x) => t.translate(x)));
   }
 
-  async function translateOne(img) {
-    if (!originals.has(img)) originals.set(img, img.currentSrc || img.src);
-    badge(img, "กำลังแปล…", "#c70");
-    const src = originals.get(img);
-    let res = await chrome.runtime.sendMessage({
-      type: "translate", src, dataUrl: src.startsWith("blob:") || src.startsWith("data:") ? tryCanvas(img) : null,
-      pageUrl: location.href, prevContext: storyContext,
-    });
-    if (res && res.needs_client_translation) { // builtin flow: backend did detect/OCR/inpaint, we translate
-      const out = await builtinTranslate(res.bubbles.map((b) => b.text), res.from_lang, res.to_lang);
-      res = await chrome.runtime.sendMessage({ type: "render", payload: { job: res.job, translations: out } });
-    }
-    if (!res || res.error) {
-      badge(img, res && res.error === "no-backend" ? "ยังไม่ได้เปิดแอป MangaTVL" : `ผิดพลาด: ${res && res.error}`, "#b22");
-      if (res && res.error === "no-backend") showInstallHint();
-      return false;
-    }
-    if (res.context) storyContext = res.context;
-    img.removeAttribute("srcset");
-    img.src = res.image;
-    badge(img, "✓", "#2a2"); setTimeout(() => badge(img, ""), 1500);
-    return true;
+  function slots(n) {
+    let free = n; const wait = [];
+    return {
+      take: () => (free > 0 ? (free--, Promise.resolve()) : new Promise((r) => wait.push(r))),
+      give: () => { const r = wait.shift(); r ? r() : free++; },
+    };
+  }
+  const ahead = slots(LOOKAHEAD), llm = slots(PARALLEL);
+  let turnTail = Promise.resolve(); // chapter mode: LLM turns in reading order
+
+  function progress() {
+    const left = queued.size;
+    msg(on ? `แปลแล้ว ${done} หน้า${left ? ` · เหลือ ${left}` : " · รอหน้าใหม่"}${failed ? ` · ผิดพลาด ${failed}` : ""}`
+           : done ? `แปลแล้ว ${done} หน้า` : "");
   }
 
-  function showInstallHint() {
-    msg("ติดตั้ง/เปิดแอป MangaTVL Companion ก่อน (ครั้งเดียว)");
+  function enqueue(im, force) {
+    if (queued.has(im)) return;
+    queued.add(im);
+    if (!originals.has(im)) originals.set(im, im.currentSrc || im.src);
+    badge(im, "รอคิว", "#555");
+    let turn = null;
+    if (mode === "chapter") { // reserve this page's LLM turn now, in reading order
+      const prev = turnTail; let release; turnTail = new Promise((r) => (release = r));
+      turn = { prev, release };
+    }
+    run(im, turn, force).finally(() => { queued.delete(im); progress(); });
+    progress();
   }
 
-  async function translateAll(only) {
-    if (busy) return; busy = true;
-    const list = only ? [only] : pages().filter((im) => !originals.has(im));
-    msg(`${list.length} หน้า`);
-    let i = 0;
-    for (const im of list) { // sequential on purpose: page N's context feeds page N+1
-      msg(`${++i}/${list.length}`);
-      const ok = await translateOne(im);
-      if (!ok) break;
+  function fail(im, error) {
+    failed++;
+    badge(im, error === "no-backend" ? "ยังไม่ได้เปิดแอป MangaTVL" : error === "old-backend"
+      ? "อัปเดตแอป MangaTVL Companion" : `ผิดพลาด: ${error}`, "#b22");
+    if (error === "no-backend" || error === "old-backend") stop();
+  }
+
+  async function run(im, turn, force) {
+    let turnHeld = !!turn, job = null;
+    const releaseTurn = () => { if (turnHeld) { turnHeld = false; turn.release(); } };
+    try {
+      await ahead.take();
+      try {
+        if (!on && !force) { originals.delete(im); badge(im, ""); return; } // stopped while waiting
+        badge(im, "กำลังอ่านภาพ…", "#c70");
+        const src = originals.get(im);
+        const a = await send({ type: "analyze", src, pageUrl: location.href,
+          dataUrl: src.startsWith("blob:") || src.startsWith("data:") ? tryCanvas(im) : null });
+        if (!a || a.error) return fail(im, a && a.error);
+        if (!a.regions) { badge(im, ""); originals.delete(im); return; } // nothing to translate
+        job = a.job;
+        if (turn) await turn.prev; else await llm.take();
+        let t;
+        try {
+          badge(im, "กำลังแปล…", "#c70");
+          t = await send({ type: "job", job, context: turn ? storyContext : null });
+          if (t && t.needs_client_translation) {
+            const out = await builtinTranslate(a.bubbles.map((b) => b.text), a.from_lang, a.to_lang);
+            t = await send({ type: "render", payload: { job, translations: out } });
+            if (t && t.image) return swap(im, t.image);
+          }
+          if (!t || t.error) return fail(im, t && t.error);
+          if (turn && t.context) storyContext = t.context;
+        } finally {
+          if (turn) releaseTurn(); else llm.give();
+        }
+      } finally {
+        ahead.give();
+      }
+      badge(im, "กำลังวางข้อความ…", "#c70");
+      const r = await send({ type: "result", job });
+      if (!r || r.error) return fail(im, r && r.error);
+      if (r.image) swap(im, r.image); else badge(im, "");
+    } catch (e) {
+      fail(im, String(e && e.message || e));
+    } finally {
+      releaseTurn();
     }
-    busy = false; if (i === list.length) msg("เสร็จ");
+  }
+
+  function swap(im, image) {
+    done++;
+    im.__mtvlOut = image;
+    im.removeAttribute("srcset");
+    im.src = image;
+    badge(im, "✓", "#2a2"); setTimeout(() => badge(im, ""), 1500);
+  }
+
+  function scan() {
+    if (!on) return;
+    [...document.images].filter((im) => !queued.has(im) && !originals.has(im) && isPage(im))
+      .sort((a, b) => top(a) - top(b)).forEach((im) => enqueue(im));
+  }
+
+  // Lazy readers load pages as you scroll; single-page readers swap the src of one <img>.
+  const observer = new MutationObserver((muts) => {
+    for (const m of muts) {
+      const im = m.target;
+      if (m.type === "attributes" && im.tagName === "IMG" && originals.has(im) && !queued.has(im)
+          && im.src !== im.__mtvlOut && im.src !== originals.get(im)) {
+        originals.delete(im); // the reader put a new page in this <img>
+      }
+    }
+    scan();
+  });
+  const onLoad = (e) => { if (e.target.tagName === "IMG") scan(); };
+
+  async function start() {
+    mode = (await send({ type: "settings" })).contextMode || "chapter";
+    on = true; failed = 0; go.textContent = "หยุด";
+    observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] });
+    document.addEventListener("load", onLoad, true);
+    scan(); progress();
+  }
+
+  function stop() {
+    on = false; go.textContent = "แปล";
+    observer.disconnect();
+    document.removeEventListener("load", onLoad, true);
+    progress();
   }
 
   function revertAll() {
-    for (const [img, src] of originals) img.src = src;
-    originals.clear(); storyContext = null; msg("");
+    stop();
+    for (const [img, src] of originals) if (!queued.has(img)) { img.src = src; badge(img, ""); }
+    for (const img of [...originals.keys()]) if (!queued.has(img)) originals.delete(img);
+    storyContext = null; done = 0; failed = 0; msg("");
   }
 
-  fab.querySelector(".mtvl-go").onclick = () => translateAll();
+  go.onclick = () => (on ? stop() : start());
   fab.querySelector(".mtvl-undo").onclick = revertAll;
-  chrome.runtime.onMessage.addListener((m) => {
-    if (m.type === "translate-all") translateAll();
+  chrome.runtime.onMessage.addListener(async (m) => {
+    if (m.type === "translate-all" && !on) start();
     if (m.type === "translate-one") {
       const im = [...document.images].find((x) => (x.currentSrc || x.src) === m.src);
-      if (im) translateAll(im);
+      if (im && !queued.has(im) && im.src !== im.__mtvlOut) { // not already translated
+        if (!on) mode = (await send({ type: "settings" })).contextMode || "chapter";
+        enqueue(im, true);
+      }
     }
   });
 })();

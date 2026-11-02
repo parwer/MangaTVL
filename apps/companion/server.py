@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import heapq
 import io
 import os
 import sys
@@ -30,9 +31,45 @@ app.add_middleware(CORSMiddleware, allow_origin_regex=r"^chrome-extension://[a-p
                    allow_methods=["*"], allow_headers=["*"], allow_private_network=True)  # Chrome local-network preflight
 
 PIPE: QualityPipeline | None = None
-JOBS: dict[str, tuple[float, object]] = {}
+JOBS: dict[str, dict] = {}  # job id -> page state, translation results and the render task
 OAUTH: dict[str, str] = {}
-LOCK = asyncio.Lock()  # one GPU job at a time
+RENDER, ANALYZE = 0, 1  # GPU priorities: lettering a translated page goes before analysing the next
+
+
+class GpuQueue:
+    """One GPU job at a time, lowest priority number first (FIFO within a priority)."""
+
+    def __init__(self):
+        self._busy, self._wait, self._n = False, [], 0
+
+    async def run(self, prio: int, fn, *args):
+        if self._busy:
+            fut = asyncio.get_running_loop().create_future()
+            self._n += 1
+            heapq.heappush(self._wait, (prio, self._n, fut))
+            try:
+                await fut  # handed over by the job before us
+            except asyncio.CancelledError:
+                if fut.done() and not fut.cancelled():  # handed over, then cancelled: pass it on
+                    self._release()
+                raise
+        self._busy = True
+        try:
+            return await asyncio.to_thread(fn, *args)
+        finally:
+            self._release()
+
+    def _release(self):
+        self._busy = False
+        while self._wait:
+            fut = heapq.heappop(self._wait)[2]
+            if not fut.done():  # skip waiters whose request was cancelled
+                self._busy = True
+                fut.set_result(None)
+                break
+
+
+GPU = GpuQueue()
 RELAY_URL = os.getenv("MTVL_RELAY_URL", "http://127.0.0.1:8787")
 TOKEN_FILE = Path(os.getenv("APPDATA", str(REPO))) / "MangaTVL" / "relay_token.txt"
 OPENAI_COMPATIBLE = {  # provider -> (base url, default model)
@@ -135,6 +172,18 @@ class TranslateReq(BaseModel):
     context: dict | None = None
 
 
+class AnalyzeReq(BaseModel):
+    image: str
+    from_lang: str = "auto"
+    to_lang: str = "thai"
+
+
+class JobReq(BaseModel):
+    job: str
+    llm: LLM = LLM()
+    context: dict | None = None  # None: translate the page on its own (no chapter context)
+
+
 class RenderReq(BaseModel):
     job: str
     translations: list[str]
@@ -148,52 +197,112 @@ def health():
     except ImportError:
         import onnxruntime as ort
         gpu = "DmlExecutionProvider" in ort.get_available_providers()
-    return {"version": VERSION, "gpu": gpu, "local_llm": ollama_ok(), "relay": relay_ok(),
+    return {"version": VERSION, "gpu": gpu, "local_llm": ollama_ok(), "relay": relay_ok(), "jobs": True,
             "providers": ["openrouter", "gemini", "relay", "local", "builtin"]}
 
 
-@app.post("/v1/translate")
-async def translate(req: TranslateReq):
-    img = decode(req.image)
-    src = None if req.from_lang == "auto" else req.from_lang
-    async with LOCK:
-        page = await asyncio.to_thread(pipe().analyze, img, src)
+def _expire():
+    for jid in [j for j, v in JOBS.items() if time.time() - v["t"] > 1800]:
+        JOBS.pop(jid, None)
+
+
+async def _analyze(image: str, from_lang: str, to_lang: str) -> dict:
+    src = None if from_lang == "auto" else from_lang
+    page = await GPU.run(ANALYZE, pipe().analyze, decode(image), src)
+    _expire()
+    jid = uuid.uuid4().hex
+    JOBS[jid] = {"t": time.time(), "page": page, "src": src, "to_lang": to_lang, "task": None}
+    return {"job": jid, "regions": len(page.ocr), "from_lang": src or "english", "to_lang": to_lang,
+            "bubbles": [{"n": n, "text": o.text} for n, o in enumerate(page.ocr)]}
+
+
+def _job(jid: str) -> dict:
+    if jid not in JOBS:
+        raise HTTPException(404, "job expired")
+    return JOBS[jid]
+
+
+def _start_render(job: dict, results, keep_words=()):
+    async def render():
+        erased = await GPU.run(RENDER, pipe().erase, job["page"], results)
+        # lettering is CPU only: off the GPU queue so the next page's analysis runs meanwhile
+        out = await asyncio.to_thread(pipe().letter, job["page"], erased, job["to_lang"], None, None, keep_words)
+        return await asyncio.to_thread(encode, out)
+    job["task"] = asyncio.create_task(render())
+
+
+async def _translate_job(job: dict, llm: LLM, context: dict | None) -> dict:
+    """LLM step only; lettering is queued on the GPU and fetched with /v1/result."""
+    page = job["page"]
     if not page.ocr:
-        return {"image": req.image, "context": req.context}
-    prov, key = req.llm.provider, req.llm.api_key
+        job["task"] = None
+        return {"context": context, "bubbles": []}
+    prov, key = llm.provider, llm.api_key
     if prov == "relay" or (prov == "none" and relay_ok()):  # zero-account tier
         prov, key = "relay", relay_token()
     if prov in ("none", "builtin"):  # the extension translates with Chrome's on-device Translator
-        for jid in [j for j, (t, _) in JOBS.items() if time.time() - t > 600]:
-            JOBS.pop(jid, None)
-        jid = uuid.uuid4().hex
-        JOBS[jid] = (time.time(), (page, req.to_lang))
-        return {"needs_client_translation": True, "job": jid, "from_lang": src or "english",
-                "to_lang": req.to_lang, "bubbles": [{"n": n, "text": o.text} for n, o in enumerate(page.ocr)]}
-    chapter = {"context": req.context}
+        return {"needs_client_translation": True, "context": context}
+    chapter = {"context": context}
     try:
-        results = await pipe().translate_page(page, translator_for(prov, key, req.llm.model), chapter=chapter,
-                                              model=req.llm.model, from_lang=src, to_lang=req.to_lang.title())
+        results = await pipe().translate_page(page, translator_for(prov, key, llm.model), chapter=chapter,
+                                              model=llm.model, from_lang=job["src"], to_lang=job["to_lang"].title())
     except Exception as e:  # provider errors (bad key, quota) go to the badge
         if prov == "relay" and "429" in str(e):
             raise HTTPException(429, "โควตาฟรีวันนี้หมดแล้ว — กด Sign in with OpenRouter เพื่อแปลต่อ") from e
         raise HTTPException(502, f"{prov}: {e}") from e
-    async with LOCK:
-        out = await asyncio.to_thread(pipe().finish, page, results, req.to_lang, None, None,
-                                      glossary_words(chapter["context"]))
-    return {"image": encode(out), "context": chapter["context"],
+    _start_render(job, results, glossary_words(chapter["context"]))
+    return {"context": chapter["context"],
             "bubbles": [{"n": n, "speaker": r.speaker, "text": r.translated_text} for n, r in enumerate(results)]}
+
+
+@app.post("/v1/analyze")
+async def analyze(req: AnalyzeReq):
+    """Detect, mask and OCR a page; returns a job id for /v1/job."""
+    return await _analyze(req.image, req.from_lang, req.to_lang)
+
+
+@app.post("/v1/job")
+async def translate_job(req: JobReq):
+    """Translate an analysed page; returns the new context as soon as the LLM answers."""
+    return await _translate_job(_job(req.job), req.llm, req.context)
+
+
+@app.get("/v1/result/{jid}")
+async def result(jid: str):
+    """The lettered page (waits for its GPU turn); no image when the page had no text."""
+    job = _job(jid)
+    if job["task"] is None:
+        JOBS.pop(jid, None)
+        return {"image": None}
+    try:
+        return {"image": await asyncio.shield(job["task"])}
+    finally:
+        if job["task"].done():
+            JOBS.pop(jid, None)
+
+
+@app.post("/v1/translate")
+async def translate(req: TranslateReq):
+    """One page in one call (analyze + job + result)."""
+    a = await _analyze(req.image, req.from_lang, req.to_lang)
+    job = JOBS[a["job"]]
+    if not a["regions"]:
+        JOBS.pop(a["job"], None)
+        return {"image": req.image, "context": req.context}
+    t = await _translate_job(job, req.llm, req.context)
+    if t.get("needs_client_translation"):
+        return {**a, "needs_client_translation": True}
+    out = await result(a["job"])
+    return {"image": out["image"], "context": t["context"], "bubbles": t["bubbles"]}
 
 
 @app.post("/v1/render")
 async def render(req: RenderReq):
-    _, (page, lang) = JOBS.pop(req.job, (0, (None, None)))
-    if page is None:
-        raise HTTPException(404, "job expired")
-    results = [TranslationResult(ocr_result=o, translated_text=t) for o, t in zip(page.ocr, req.translations)]
-    async with LOCK:
-        out = await asyncio.to_thread(pipe().finish, page, results, lang)
-    return {"image": encode(out)}
+    """Letter a page with translations made by the extension (builtin flow)."""
+    job = _job(req.job)
+    results = [TranslationResult(ocr_result=o, translated_text=t) for o, t in zip(job["page"].ocr, req.translations)]
+    _start_render(job, results)
+    return await result(req.job)
 
 
 @app.get("/oauth/callback", response_class=HTMLResponse)
