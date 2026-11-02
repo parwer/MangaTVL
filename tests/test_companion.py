@@ -42,7 +42,6 @@ class StubPipe:
 def client(monkeypatch, texts):
     stub = StubPipe(texts)
     monkeypatch.setattr(srv, "PIPE", stub)
-    monkeypatch.setattr(srv, "relay_ok", lambda: False)
     return TestClient(srv.app), stub
 
 

@@ -70,10 +70,11 @@ class GpuQueue:
 
 
 GPU = GpuQueue()
-RELAY_URL = os.getenv("MTVL_RELAY_URL", "http://127.0.0.1:8787")
-TOKEN_FILE = Path(os.getenv("APPDATA", str(REPO))) / "MangaTVL" / "relay_token.txt"
+# Relay (apps/relay): the owner's OpenRouter key behind a free daily quota. Off until it is deployed somewhere.
+# RELAY_URL = os.getenv("MTVL_RELAY_URL", "http://127.0.0.1:8787")
+# TOKEN_FILE = Path(os.getenv("APPDATA", str(REPO))) / "MangaTVL" / "relay_token.txt"
 OPENAI_COMPATIBLE = {  # provider -> (base url, default model)
-    "relay": (RELAY_URL + "/v1", "google/gemini-2.5-flash-lite"),
+    # "relay": (RELAY_URL + "/v1", "google/gemini-2.5-flash-lite"),
     "local": ("http://127.0.0.1:11434/v1", "qwen3-vl:4b-instruct"),  # Ollama; any other URL from the popup
 }
 
@@ -113,24 +114,25 @@ def ollama_ok() -> bool:
         return False
 
 
-def relay_token() -> str | None:
-    """Anonymous device token for the owner's relay, created on first use."""
-    if TOKEN_FILE.exists():
-        return TOKEN_FILE.read_text().strip()
-    try:
-        tok = requests.post(RELAY_URL + "/v1/register", timeout=5).json()["token"]
-    except Exception:
-        return None
-    TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-    TOKEN_FILE.write_text(tok)
-    return tok
-
-
-def relay_ok() -> bool:
-    try:
-        return requests.post(RELAY_URL + "/v1/chat/completions", timeout=1).status_code in (401, 422)
-    except requests.RequestException:
-        return False
+# Relay off (see RELAY_URL above).
+# def relay_token() -> str | None:
+#     """Anonymous device token for the owner's relay, created on first use."""
+#     if TOKEN_FILE.exists():
+#         return TOKEN_FILE.read_text().strip()
+#     try:
+#         tok = requests.post(RELAY_URL + "/v1/register", timeout=5).json()["token"]
+#     except Exception:
+#         return None
+#     TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+#     TOKEN_FILE.write_text(tok)
+#     return tok
+#
+#
+# def relay_ok() -> bool:
+#     try:
+#         return requests.post(RELAY_URL + "/v1/chat/completions", timeout=1).status_code in (401, 422)
+#     except requests.RequestException:
+#         return False
 
 
 def local_models(base_url: str) -> list[str]:
@@ -141,7 +143,7 @@ def local_models(base_url: str) -> list[str]:
 
 
 def translator_for(provider: str, api_key: str | None, model: str | None, base_url: str | None = None):
-    """A translator for the provider; relay / local are OpenAI-compatible endpoints."""
+    """A translator for the provider; local (and the relay, when on) are OpenAI-compatible endpoints."""
     if provider in OPENAI_COMPATIBLE:
         from openai import AsyncOpenAI
         from manga_translator.translators import AsyncOpenRouterTranslator
@@ -210,8 +212,9 @@ def health():
     except ImportError:
         import onnxruntime as ort
         gpu = "DmlExecutionProvider" in ort.get_available_providers()
-    return {"version": VERSION, "gpu": gpu, "local_llm": ollama_ok(), "relay": relay_ok(), "jobs": True,
-            "providers": ["openrouter", "gemini", "relay", "local", "builtin"]}
+    # relay off: "relay": relay_ok() and "relay" in providers
+    return {"version": VERSION, "gpu": gpu, "local_llm": ollama_ok(), "relay": False, "jobs": True,
+            "providers": ["openrouter", "gemini", "local", "builtin"]}
 
 
 def _expire():
@@ -253,8 +256,9 @@ async def _translate_job(job: dict, llm: LLM, context: dict | None) -> dict:
         job["task"] = None
         return {"context": context, "bubbles": []}
     prov, key = llm.provider, llm.api_key
-    if prov == "relay" or (prov == "none" and relay_ok()):  # zero-account tier
-        prov, key = "relay", relay_token()
+    # relay off: zero-account tier
+    # if prov == "relay" or (prov == "none" and relay_ok()):
+    #     prov, key = "relay", relay_token()
     if prov in ("none", "builtin"):  # the extension translates with Chrome's on-device Translator
         return {"needs_client_translation": True, "context": context}
     chapter = {"context": context}
@@ -263,8 +267,9 @@ async def _translate_job(job: dict, llm: LLM, context: dict | None) -> dict:
         results = await pipe().translate_page(page, tr, chapter=chapter,
                                               model=llm.model, from_lang=job["src"], to_lang=job["to_lang"].title())
     except Exception as e:  # provider errors (bad key, quota) go to the badge
-        if prov == "relay" and "429" in str(e):
-            raise HTTPException(429, "โควตาฟรีวันนี้หมดแล้ว — กด Sign in with OpenRouter เพื่อแปลต่อ") from e
+        # relay off: its daily quota
+        # if prov == "relay" and "429" in str(e):
+        #     raise HTTPException(429, "โควตาฟรีวันนี้หมดแล้ว — กด Sign in with OpenRouter เพื่อแปลต่อ") from e
         raise HTTPException(502, f"{prov}: {e}") from e
     _start_render(job, results, glossary_words(chapter["context"]))
     return {"context": chapter["context"],

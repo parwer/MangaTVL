@@ -1,8 +1,7 @@
 // MangaTVL — service worker.
 // Responsibilities:
 //   1. "Sign in with OpenRouter" (OAuth PKCE) -> the user never copies an API key.
-//   2. Discover a backend: local companion app (127.0.0.1:8765) first, then an
-//      optional hosted relay. The user never types a server URL in the common case.
+//   2. Discover the local companion app (127.0.0.1:8765); the user never types a server URL.
 //   3. Fetch page images itself (host_permissions) and ship bytes to the backend,
 //      so hot-link-protected reader sites still work (the old userscript sent URLs
 //      and the server re-downloaded them without the site's cookies/referrer).
@@ -16,8 +15,9 @@ const DEFAULTS = {
   localUrl: "",             // Local AI: OpenAI-compatible server; blank = Ollama (http://127.0.0.1:11434/v1)
   toLang: "thai",
   fromLang: "auto",
-  relayUrl: "",             // optional hosted relay (see docs/p1-easy-access.md, tier C)
-  relayToken: "",
+  // relay off: a hosted backend in place of the app (needs the analyze / job / result flow there too)
+  // relayUrl: "",
+  // relayToken: "",
   quality: "best",          // best | fast
   contextMode: "chapter",   // chapter: story context page to page | page: each page on its own, in parallel
 };
@@ -85,10 +85,11 @@ async function findBackend(settings) {
       }
     } catch (_) { /* not running */ }
   }
-  if (settings.relayUrl) {
-    cachedBackend = { kind: "relay", base: settings.relayUrl.replace(/\/$/, ""), info: {} };
-    return cachedBackend;
-  }
+  // relay off (see DEFAULTS)
+  // if (settings.relayUrl) {
+  //   cachedBackend = { kind: "relay", base: settings.relayUrl.replace(/\/$/, ""), info: {} };
+  //   return cachedBackend;
+  // }
   return null;
 }
 
@@ -105,7 +106,8 @@ function llmConfig(s, backendInfo) {
   if (mode === "builtin") return { provider: "builtin" }; // Chrome on-device Translator, done in content.js
   const local = { provider: "local", model: s.model || null, base_url: s.localUrl || null };
   if (mode === "local" || (mode === "auto" && s.localUrl)) return local; // the user's own server
-  if (mode === "auto" && backendInfo && backendInfo.relay) return { provider: "relay" }; // free daily quota, no account
+  // relay off: free daily quota, no account (apps/relay)
+  // if (mode === "auto" && backendInfo && backendInfo.relay) return { provider: "relay" };
   if (backendInfo && backendInfo.local_llm) return local;
   return { provider: "none" };
 }
@@ -162,7 +164,7 @@ async function translateImage({ src, dataUrl, pageUrl, prevContext }) {
   if (!backend) return { error: "no-backend" };
   const llm = llmConfig(s, backend.info);
   const headers = { "Content-Type": "application/json" };
-  if (backend.kind === "relay" && s.relayToken) headers.Authorization = `Bearer ${s.relayToken}`;
+  // relay off: if (backend.kind === "relay" && s.relayToken) headers.Authorization = `Bearer ${s.relayToken}`;
   const body = {
     image: await pageImage(src, dataUrl, pageUrl), page_url: pageUrl, from_lang: s.fromLang, to_lang: s.toLang,
     quality: s.quality, llm, context: prevContext || null,

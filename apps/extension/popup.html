@@ -43,7 +43,8 @@
   <input id="localUrl" placeholder="เว้นว่าง = Ollama http://127.0.0.1:11434/v1 · LM Studio http://127.0.0.1:1234/v1">
   <button id="checkLocal" class="ghost">ตรวจ Local AI</button><small id="localInfo"></small>
   <label>Model (เว้นว่าง = ค่าเริ่มต้น)</label><input id="model">
-  <label>Relay server (ถ้าองค์กรมีให้)</label><input id="relayUrl" placeholder="https://…">
+  <!-- relay off -->
+  <label hidden>Relay server (ถ้าองค์กรมีให้)</label><input id="relayUrl" placeholder="https://…" hidden>
   <label>คุณภาพ</label><select id="quality"><option value="best">ดีที่สุด (LaMa + typesetting)</option><option value="fast">เร็ว (ไม่ใช้ LaMa และตัวกรอง SFX ญี่ปุ่น)</option></select>
   <button id="save" class="ghost">บันทึก</button>
  </details>
