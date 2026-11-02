@@ -21,7 +21,7 @@ sys.path.insert(0, str(REPO))
 from pipeline import QualityPipeline, glossary_words  # noqa: E402
 from manga_translator.schemas.interface import TranslationResult  # noqa: E402
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 MODEL = os.getenv("MODEL") or "google/gemini-3-flash-preview"
 # MTVL_DEVICE, not DEVICE: the repo .env sets DEVICE=cpu for main.py, which put the companion's
 # glyph mask and LaMa on the CPU (minutes per page, the whole PC froze)

@@ -6,6 +6,7 @@
   const MIN_W = 380;
   const LOOKAHEAD = 3;   // pages analysed ahead of the one being translated
   const PARALLEL = 4;    // page mode: LLM calls at once
+  const DOWNLOAD_URL = "https://github.com/parwer/MangaTVL/releases/latest";
   const originals = new Map(); // img -> original src
   const queued = new Set();
   let storyContext = null;      // chapter mode: returned by the backend, fed to the next page
@@ -94,7 +95,13 @@
     failed++;
     badge(im, error === "no-backend" ? "ยังไม่ได้เปิดแอป MangaTVL" : error === "old-backend"
       ? "อัปเดตแอป MangaTVL Companion" : `ผิดพลาด: ${error}`, "#b22");
-    if (error === "no-backend" || error === "old-backend") stop();
+    if (error === "no-backend" || error === "old-backend") {
+      stop();
+      const a = document.createElement("a"); // the app is a one-time install: link to it from the button
+      a.href = DOWNLOAD_URL; a.target = "_blank"; a.className = "mtvl-get";
+      a.textContent = error === "no-backend" ? "เปิดแอป MangaTVL หรือดาวน์โหลด" : "ดาวน์โหลดแอปเวอร์ชันใหม่";
+      fab.querySelector(".mtvl-msg").replaceChildren(a);
+    }
   }
 
   async function run(im, turn, force) {

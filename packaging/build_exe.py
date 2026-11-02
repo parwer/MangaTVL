@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import PyInstaller.__main__
@@ -9,13 +10,19 @@ WORK = REPO / "packaging" / "build" / "pyi"
 
 
 def main():
-    """PyInstaller --onedir build of the staged torch-free companion."""
+    """PyInstaller --onedir build of the staged torch-free companion (tray app, no console)."""
     launcher = APP / "mangatvl_companion.py"
-    launcher.write_text("import multiprocessing\nfrom apps.companion.server import main\n"
+    launcher.write_text("import multiprocessing\nfrom apps.companion.tray import main\n"
                         "if __name__ == '__main__':\n    multiprocessing.freeze_support()\n    main()\n",
                         encoding="utf-8")
+    sys.path.insert(0, str(APP))
+    from apps.companion.tray import icon_image
+    ico = WORK / "mangatvl.ico"
+    ico.parent.mkdir(parents=True, exist_ok=True)
+    icon_image(256).save(ico, sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (256, 256)])
     PyInstaller.__main__.run([
-        str(launcher), "--name", "MangaTVL-Companion", "--onedir", "--noconfirm", "--console",
+        str(launcher), "--name", "MangaTVL-Companion", "--onedir", "--noconfirm", "--windowed",
+        "--icon", str(ico), "--hidden-import", "pystray._win32",
         "--distpath", str(DIST), "--workpath", str(WORK), "--specpath", str(WORK), "--paths", str(APP),
         # the server finds models via Path(__file__).parents[2] -> keep the repo layout inside _internal
         "--add-data", f"{APP / 'manga_translator' / 'assets'};manga_translator/assets",
