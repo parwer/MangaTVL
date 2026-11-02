@@ -27,7 +27,7 @@ MODEL = os.getenv("MODEL") or "google/gemini-3-flash-preview"
 DEVICE = os.getenv("MTVL_DEVICE")
 app = FastAPI(title="MangaTVL Companion")
 app.add_middleware(CORSMiddleware, allow_origin_regex=r"^chrome-extension://[a-p]{32}$|^moz-extension://.*$",
-                   allow_methods=["*"], allow_headers=["*"])
+                   allow_methods=["*"], allow_headers=["*"], allow_private_network=True)  # Chrome local-network preflight
 
 PIPE: QualityPipeline | None = None
 JOBS: dict[str, tuple[float, object]] = {}
