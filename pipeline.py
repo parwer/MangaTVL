@@ -247,6 +247,7 @@ class PageState:
     clean: Optional[Image.Image] = None
     rendered: Optional[Image.Image] = None
     timings: dict = field(default_factory=dict)
+    glyph: object = None  # text mask (ndarray) between analyze_gpu and analyze_cpu
 
     def lap(self, name, start):
         import time
@@ -281,11 +282,15 @@ class QualityPipeline(Pipeline):
 
     def analyze(self, image: Image.Image, from_lang=None) -> "PageState":
         """Detect, mask, repair regions, OCR and build per-region glyph masks."""
+        return self.analyze_cpu(self.analyze_gpu(image, from_lang), from_lang)
+
+    def analyze_gpu(self, image: Image.Image, from_lang=None) -> "PageState":
+        """The GPU half of analyze: detect, text mask, region repair and the main OCR."""
         import time
         import cv2
         from manga_translator.detection.refine import refine_regions
-        from manga_translator.masking import refine_mask, region_glyph_masks
-        from manga_translator.ocr.region_ocr import drop_foreign_text, read_regions
+        from manga_translator.masking import refine_mask
+        from manga_translator.ocr.region_ocr import first_reads
         from manga_translator.utils.common import pil2cv
 
         page = PageState(image=image.convert("RGB"))
@@ -300,12 +305,26 @@ class QualityPipeline(Pipeline):
         dets = refine_regions(dets, self.masker.blocks, glyph, core, cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY))
         page.lap("textmask", t)
         t = time.perf_counter()
+        page.ocr = first_reads(self._get_ocr(from_lang), page.image, dets, core)
+        page.lap("ocr", t)
+        page.glyph = glyph
+        return page
+
+    def analyze_cpu(self, page: "PageState", from_lang=None) -> "PageState":
+        """The CPU half of analyze: second OCR reading, foreign-text filter and glyph masks."""
+        import time
+        from manga_translator.masking import region_glyph_masks
+        from manga_translator.ocr.region_ocr import drop_foreign_text, finish_reads
+        from manga_translator.utils.common import pil2cv
+
+        t = time.perf_counter()
         second = self._second_reader(from_lang)
-        page.ocr = read_regions(self._get_ocr(from_lang), page.image, dets, core, reread=second)
+        page.ocr = finish_reads(page.ocr, page.image, reread=second)
         if second is not None and getattr(self, "foreign_filter", False):
             page.ocr = drop_foreign_text(page.ocr, page.image, second)
-        page.masks = region_glyph_masks(bgr, glyph, page.ocr) if page.ocr else []
-        page.lap("ocr", t)
+        page.masks = region_glyph_masks(pil2cv(page.image), page.glyph, page.ocr) if page.ocr else []
+        page.glyph = None
+        page.timings["ocr"] = round(page.timings.get("ocr", 0) + time.perf_counter() - t, 3)  # both halves
         return page
 
     def _second_reader(self, from_lang):

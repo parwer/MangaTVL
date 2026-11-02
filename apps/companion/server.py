@@ -208,7 +208,9 @@ def _expire():
 
 async def _analyze(image: str, from_lang: str, to_lang: str) -> dict:
     src = None if from_lang == "auto" else from_lang
-    page = await GPU.run(ANALYZE, pipe().analyze, decode(image), src)
+    page = await GPU.run(ANALYZE, pipe().analyze_gpu, decode(image), src)
+    # second OCR reading is CPU only: off the GPU queue so the next page's detection runs meanwhile
+    page = await asyncio.to_thread(pipe().analyze_cpu, page, src)
     _expire()
     jid = uuid.uuid4().hex
     JOBS[jid] = {"t": time.time(), "page": page, "src": src, "to_lang": to_lang, "task": None}

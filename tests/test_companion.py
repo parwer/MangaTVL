@@ -22,9 +22,12 @@ class StubPipe:
     def __init__(self, texts):
         self.texts, self.finished = texts, []
 
-    def analyze(self, image, from_lang=None):
+    def analyze_gpu(self, image, from_lang=None):
         det = DetectionResult(bbox=[0, 0, 10, 10], form_type="bubble")
         return PageState(image=image, ocr=[OCRResult(text=t, boxes=[], detection_result=det) for t in self.texts])
+
+    def analyze_cpu(self, page, from_lang=None):
+        return page
 
     def erase(self, page, results):
         page.results = results

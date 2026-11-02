@@ -18,7 +18,10 @@
   document.documentElement.appendChild(fab);
   const showFab = (sites) => { fab.hidden = !(sites || {})[location.hostname] && !on; };
   chrome.storage.local.get("sites").then((v) => showFab(v.sites));
-  chrome.storage.onChanged.addListener((ch) => { if (ch.sites) showFab(ch.sites.newValue); });
+  chrome.storage.onChanged.addListener((ch) => {
+    if (ch.sites) showFab(ch.sites.newValue);
+    if (ch.contextMode) mode = ch.contextMode.newValue || "chapter"; // pages queued from now on
+  });
   const go = fab.querySelector(".mtvl-go");
   const msg = (t) => (fab.querySelector(".mtvl-msg").textContent = t || "");
   const send = (m) => chrome.runtime.sendMessage(m).catch((e) => ({ error: String(e) }));
@@ -95,10 +98,11 @@
   }
 
   async function run(im, turn, force) {
-    let turnHeld = !!turn, job = null;
+    let turnHeld = !!turn, aheadHeld = false, job = null;
     const releaseTurn = () => { if (turnHeld) { turnHeld = false; turn.release(); } };
+    const releaseAhead = () => { if (aheadHeld) { aheadHeld = false; ahead.give(); } };
     try {
-      await ahead.take();
+      await ahead.take(); aheadHeld = true;
       try {
         if (!on && !force) { originals.delete(im); badge(im, ""); return; } // stopped while waiting
         badge(im, "กำลังอ่านภาพ…", "#c70");
@@ -108,7 +112,8 @@
         if (!a || a.error) return fail(im, a && a.error);
         if (!a.regions) { badge(im, ""); originals.delete(im); return; } // nothing to translate
         job = a.job;
-        if (turn) await turn.prev; else await llm.take();
+        if (turn) await turn.prev;
+        else { await llm.take(); releaseAhead(); } // page mode: in the LLM, so analyse another page meanwhile
         let t;
         try {
           badge(im, "กำลังแปล…", "#c70");
@@ -124,7 +129,7 @@
           if (turn) releaseTurn(); else llm.give();
         }
       } finally {
-        ahead.give();
+        releaseAhead();
       }
       badge(im, "กำลังวางข้อความ…", "#c70");
       const r = await send({ type: "result", job });

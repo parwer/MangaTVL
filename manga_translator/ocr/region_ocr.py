@@ -33,23 +33,32 @@ def grow_to_glyphs(regions: list[DetectionResult], glyph: np.ndarray, share: flo
 def read_regions(engine, image: Image.Image, dets: list[DetectionResult], core: np.ndarray | None = None,
                  reread=None) -> list[OCRResult]:
     """OCR all detections, hiding overlapping free text from the balloons; ``reread`` retries letterless reads."""
+    return finish_reads(first_reads(engine, image, dets, core), image, reread)
+
+
+def first_reads(engine, image: Image.Image, dets: list[DetectionResult], core: np.ndarray | None = None) -> list:
+    """Main OCR of every detection (None where skipped); the GPU part of read_regions."""
     if not dets:
         return []
     hide = [d for d in dets if d.form_type == "free_text"
             and any(_overlap(d.bbox, b.bbox) for b in dets if b.form_type != "free_text")]
-    if hide and core is not None:
-        arr = np.asarray(image.convert("RGB")).copy()
-        # letters, not dilated glyph blobs (those bridge the aside and the dialogue)
-        arr[grow_to_glyphs(hide, cv2.dilate(core, np.ones((3, 3), np.uint8))) > 0] = 255
-        masked = Image.fromarray(arr)
-        ocr = [None] * len(dets)
-        for idx, im in (([i for i, d in enumerate(dets) if d.form_type != "free_text"], masked),
-                        ([i for i, d in enumerate(dets) if d.form_type == "free_text"], image)):
-            if idx:
-                for i, r in zip(idx, engine.get_ocr(im, [dets[i] for i in idx])):
-                    ocr[i] = r
-    else:
-        ocr = engine.get_ocr(image, dets)
+    if not (hide and core is not None):
+        return engine.get_ocr(image, dets)
+    arr = np.asarray(image.convert("RGB")).copy()
+    # letters, not dilated glyph blobs (those bridge the aside and the dialogue)
+    arr[grow_to_glyphs(hide, cv2.dilate(core, np.ones((3, 3), np.uint8))) > 0] = 255
+    masked = Image.fromarray(arr)
+    ocr = [None] * len(dets)
+    for idx, im in (([i for i, d in enumerate(dets) if d.form_type != "free_text"], masked),
+                    ([i for i, d in enumerate(dets) if d.form_type == "free_text"], image)):
+        if idx:
+            for i, r in zip(idx, engine.get_ocr(im, [dets[i] for i in idx])):
+                ocr[i] = r
+    return ocr
+
+
+def finish_reads(ocr: list, image: Image.Image, reread=None) -> list[OCRResult]:
+    """Retry letterless reads with ``reread`` (CPU), then drop empty reads and letterless free text."""
     if reread is not None:
         # vertical / stacked lettering: a line OCR reads READY~ as "0", YEAAHH! as "1" (ch.29)
         for o in ocr:
