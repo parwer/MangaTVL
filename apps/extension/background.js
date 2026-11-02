@@ -188,7 +188,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       if (msg.type === "analyze") return reply(await analyzePage(msg));
       if (msg.type === "job") return reply(await translateJob(msg));
       if (msg.type === "result") return reply(await jobResult(msg));
-      if (msg.type === "settings") return reply(await getSettings().then((s) => ({ contextMode: s.contextMode })));
+      if (msg.type === "settings") return reply(await getSettings().then((s) => ({ contextMode: s.contextMode, llmMode: s.llmMode, toLang: s.toLang })));
       if (msg.type === "render") { // second half of the "builtin" flow
         const b = await findBackend(await getSettings());
         const r = await fetch(`${b.base}/v1/render`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(msg.payload) });

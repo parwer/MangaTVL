@@ -53,11 +53,31 @@
     } catch (_) { return null; } // tainted canvas
   }
 
-  // Chrome built-in on-device Translator (no account, no key, offline).
+  // Chrome built-in on-device Translator (no account, no key, offline). One per language pair:
+  // create() needs a user click while its model still has to be downloaded, so start() warms it up.
+  const ISO = { thai: "th", english: "en", japanese: "ja", korean: "ko", chinese: "zh" };
+  const translators = {};
+  const BUILTIN_ERRORS = {
+    "builtin-missing": "เบราว์เซอร์นี้ไม่มีตัวแปลในตัวของ Chrome — เลือก AI อื่นใน popup",
+    "builtin-pair": "ตัวแปลในตัวของ Chrome ไม่รองรับภาษาคู่นี้",
+    "builtin-click": "ต้องดาวน์โหลดตัวแปลก่อน — กดปุ่มแปลอีกครั้ง",
+  };
+  function getTranslator(from, to) {
+    const opts = { sourceLanguage: ISO[from] || "en", targetLanguage: ISO[to] || "th" };
+    const key = `${opts.sourceLanguage}>${opts.targetLanguage}`;
+    if (!translators[key]) {
+      translators[key] = (async () => {
+        if (!("Translator" in self)) throw new Error("builtin-missing");
+        if ((await Translator.availability(opts)) === "unavailable") throw new Error("builtin-pair");
+        try { return await Translator.create(opts); }
+        catch (e) { throw new Error(e && e.name === "NotAllowedError" ? "builtin-click" : String(e && e.message || e)); }
+      })();
+      translators[key].catch(() => delete translators[key]); // try again next time
+    }
+    return translators[key];
+  }
   async function builtinTranslate(texts, from, to) {
-    if (!("Translator" in self)) throw new Error("Chrome built-in Translator API not available");
-    const iso = { thai: "th", english: "en", japanese: "ja", korean: "ko", chinese: "zh" };
-    const t = await Translator.create({ sourceLanguage: iso[from] || "en", targetLanguage: iso[to] || "th" });
+    const t = await getTranslator(from, to);
     return Promise.all(texts.map((x) => t.translate(x)));
   }
 
@@ -71,7 +91,9 @@
   const ahead = slots(LOOKAHEAD), llm = slots(PARALLEL);
   let turnTail = Promise.resolve(); // chapter mode: LLM turns in reading order
 
+  let notice = ""; // stays on the button after a stop (e.g. the built-in translator is missing)
   function progress() {
+    if (!on && notice) return msg(notice);
     const left = queued.size;
     msg(on ? `แปลแล้ว ${done} หน้า${left ? ` · เหลือ ${left}` : " · รอหน้าใหม่"}${failed ? ` · ผิดพลาด ${failed}` : ""}`
            : done ? `แปลแล้ว ${done} หน้า` : "");
@@ -92,6 +114,12 @@
   }
 
   function fail(im, error) {
+    if (BUILTIN_ERRORS[error]) { // same for every page: one message on the button, not a red badge per page
+      badge(im, "");
+      notice = BUILTIN_ERRORS[error];
+      if (on) stop(); else progress();
+      return;
+    }
     failed++;
     badge(im, error === "no-backend" ? "ยังไม่ได้เปิดแอป MangaTVL" : error === "old-backend"
       ? "อัปเดตแอป MangaTVL Companion" : `ผิดพลาด: ${error}`, "#b22");
@@ -105,7 +133,7 @@
   }
 
   async function run(im, turn, force) {
-    let turnHeld = !!turn, aheadHeld = false, job = null;
+    let turnHeld = !!turn, aheadHeld = false, job = null, fetched = false;
     const releaseTurn = () => { if (turnHeld) { turnHeld = false; turn.release(); } };
     const releaseAhead = () => { if (aheadHeld) { aheadHeld = false; ahead.give(); } };
     try {
@@ -127,6 +155,7 @@
           t = await send({ type: "job", job, context: turn ? storyContext : null });
           if (t && t.needs_client_translation) {
             const out = await builtinTranslate(a.bubbles.map((b) => b.text), a.from_lang, a.to_lang);
+            fetched = true; // /v1/render answers with the page and frees the job
             t = await send({ type: "render", payload: { job, translations: out } });
             if (t && t.image) return swap(im, t.image);
           }
@@ -139,6 +168,7 @@
         releaseAhead();
       }
       badge(im, "กำลังวางข้อความ…", "#c70");
+      fetched = true;
       const r = await send({ type: "result", job });
       if (!r || r.error) return fail(im, r && r.error);
       if (r.image) swap(im, r.image); else badge(im, "");
@@ -146,6 +176,8 @@
       fail(im, String(e && e.message || e));
     } finally {
       releaseTurn();
+      // failed after analysis: fetch the result anyway so the app frees the page (else it holds it 30 min)
+      if (job && !fetched) send({ type: "result", job });
     }
   }
 
@@ -177,8 +209,11 @@
   const onLoad = (e) => { if (e.target.tagName === "IMG") scan(); };
 
   async function start() {
-    mode = (await send({ type: "settings" })).contextMode || "chapter";
-    on = true; failed = 0; go.textContent = "หยุด"; fab.hidden = false;
+    const s = await send({ type: "settings" });
+    mode = s.contextMode || "chapter";
+    // inside the click: the built-in translator may need it to download its model
+    if (s.llmMode === "builtin" && "Translator" in self) getTranslator("english", s.toLang).catch(() => {});
+    notice = ""; on = true; failed = 0; go.textContent = "หยุด"; fab.hidden = false;
     observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] });
     document.addEventListener("load", onLoad, true);
     scan(); progress();
