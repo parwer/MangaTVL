@@ -41,11 +41,11 @@ The stages communicate through Pydantic models in [`manga_translator/schemas/int
 | Translation | OpenRouter / Gemini / Groq VLM (async, text + image) | [`translators/`](manga_translator/translators/) |
 | Inpainting | OpenCV / Simple-LaMa | [`inpainting/`](manga_translator/inpainting/) |
 | Rendering | balloon-shape-aware layout, HarfBuzz shaping (Thai marks), page-level size planning | [`rendering/`](manga_translator/rendering/) |
-| Serving | FastAPI | [`main.py`](main.py) |
+| Serving | FastAPI companion app | [`apps/companion/`](apps/companion/) |
 
 ### Quality mode (`QualityPipeline`)
 
-`QualityPipeline` (same API, `QUALITY=1` for `main.py`) works on the letters instead of boxes:
+`QualityPipeline` (used by the companion app) works on the letters instead of boxes:
 
 ```
 detect (balloons + free text: HybridDetection)
@@ -92,153 +92,18 @@ Run everything from the `MangaTVL/` directory.
 
 ## Configuration
 
-Copy `.env.example` → `.env` and set **one** provider key plus the pipeline config:
+Copy `.env.example` → `.env` and set **one** provider key:
 
 ```ini
 OPENROUTER_API_KEY=...           # or GROQ_API_KEY / GOOGLE_API_KEY
-DEVICE=cpu                       # cpu | cuda
-PROVIDER=openrouter              # openrouter | gemini | groq
 MODEL=google/gemini-3-flash-preview
 CONCURRENT_REQUESTS=4            # max concurrent LLM calls
-FREE_TEXT_MODEL=default          # optional: also detect free text (asides, captions, SFX)
-QUALITY=1                        # optional: QualityPipeline (glyph masks, LaMa, chapter context)
 ```
-
-`main.py` reads `DEVICE`/`PROVIDER`/`MODEL` from the environment, so the same image runs on CPU or GPU without code changes.
 
 > Note: the Gemini provider reads `GOOGLE_API_KEY` (not `GEMINI_API_KEY`).
 
----
-
-## Run with Docker (recommended for deployment)
-
-Model weight (`best_diplom.pt`) and the Thai font are baked into the image; only the API keys are passed at runtime via `.env`.
-
-**CPU (default):**
-```bash
-cp .env.example .env        # fill in a provider key
-docker compose up --build   # builds Dockerfile, serves on :8000
-```
-or manually:
-```bash
-docker build -t mangatvl-api .
-docker run -p 8000:8000 --env-file .env mangatvl-api
-```
-
-**GPU (CUDA):** build with the GPU Dockerfile, set `DEVICE=cuda`, and pass `--gpus all`:
-```bash
-docker build -f Dockerfile.gpu -t mangatvl-api-gpu .
-docker run --gpus all -e DEVICE=cuda -p 8000:8000 --env-file .env mangatvl-api-gpu
-```
-
-Once running, the API is at `http://localhost:8000` (interactive docs at `/docs`).
-
----
-
-## Running the API (without Docker)
-
-```powershell
-..\MangaTVL_ENV\python.exe -m uvicorn main:app --reload
-```
-
-`main.py` configures the pipeline (provider, model, device) at the top — edit it to change providers or pass custom detector/OCR/inpainter/renderer instances.
-
-### Endpoint
-
-`POST /translate/`
-
-```json
-{
-  "images": ["https://cdn.example.com/p1.jpg", "https://cdn.example.com/p2.jpg"],
-  "process_image": false,
-  "provider": "openrouter",
-  "api_key": "sk-...",
-  "model": "google/gemini-2.5-flash",
-  "from_lang": "english",
-  "to_lang": "thai",
-  "font": "itim",
-  "text_scale": 1.2,
-  "upscale": 2,
-  "upscaler": "lanczos",
-  "custom_instruction": "keep character honorifics; use a polite tone"
-}
-```
-
-- `images` (required): a **list of image URLs** collected client-side (e.g. a browser extension that reads the rendered manga-reader DOM). The full pipeline runs on each and returns base64-encoded translated images.
-- The response list is **index-aligned** with the request (`null` for any image that failed), so the client can map each result back to its source image and swap it in place.
-- `process_image: true` also sends the (downscaled) page to the LLM as **visual context** for better translation. Images are sent as proper multimodal parts, so the token cost stays low.
-- `provider` / `api_key` / `model` / `from_lang` / `to_lang` are **optional per-request overrides**. Omit any of them to fall back to the server's defaults (and the env API key for that provider). `provider` ∈ `openrouter | gemini | groq`.
-- `from_lang` also selects the **OCR engine**: `from_lang: "japanese"` switches OCR to **manga-ocr** (handles vertical text); other languages use **EasyOCR**. The mapping lives in [`manga_translator/assets/languages.json`](manga_translator/assets/languages.json) (`engine` field) and engines are cached per language, so the first Japanese request downloads the manga-ocr model (~400MB) and subsequent ones reuse it.
-- `font` picks the lettering font (a `key` from `GET /fonts/`). Omit it to use the per-language default. A font is only usable for languages it has glyphs for (a Latin-only comic font can't draw Thai/CJK) — see **Fonts** below.
-- `text_scale` makes the text bigger/smaller (default `1.2`, range `0.5–2.0`). The renderer auto-fits text to the bubble's inscribed rectangle, which is conservative for round bubbles and can leave the text small; `text_scale` grows the fit area toward the bubble's bounding box (capped to it) so text fills more of the bubble. Text is also supersampled (drawn at 2× then downscaled) for crisper edges.
-- `upscale` enlarges the **returned page** by this factor (`1` = off, max `4`); `upscaler` picks how:
-  - `lanczos` (default) — fast, no extra deps. Bigger page (our rendered text stays sharp); the source artwork is enlarged but not deblurred.
-  - `realesrgan` — AI super-resolution (anime-tuned) that actually sharpens/deblurs blurry source art. Heavy and slow on CPU; needs `realesrgan`+`basicsr` (not installed by default — see `requirement.txt`). If unavailable it **falls back to LANCZOS**.
-- `custom_instruction` is a free-text localization instruction appended to the translator's guidelines for that request (e.g. `"keep -san/-chan honorifics"`, `"use casual slang"`, `"translate SFX literally"`). It's marked highest-priority in the system prompt; omit for the default guidelines.
-
-#### Fonts
-
-`GET /fonts/` lists the available fonts: `{ "fonts": [{ "key", "label", "scripts" }] }`. Pass a `key` as `font` in a translate request. Several manga/comic fonts (OFL/Apache, from Google Fonts) ship in [`manga_translator/assets/fonts/`](manga_translator/assets/fonts/) and are described in [`manga_translator/assets/fonts.json`](manga_translator/assets/fonts.json):
-
-| Script | Fonts |
-|--------|-------|
-| Thai (+Latin) | TH Sarabun (default), Itim, Mali, Sriracha, Charm |
-| Latin (comic) | Bangers, Comic Neue, Permanent Marker, Patrick Hand |
-| Japanese | Yusei Magic |
-| Chinese | Zhi Mang Xing |
-| Korean | Nanum Pen |
-
-When `font` is omitted, the renderer uses the default for the target language (`defaults` in `fonts.json`) so CJK/Korean text gets a font with the right glyphs instead of tofu boxes. Add a font by dropping a `.ttf` into the folder and adding an entry to `fonts.json`.
-
-> **Security:** `api_key` travels in the request body — use HTTPS in production and avoid logging it. The userscript stores the key in Tampermonkey's `GM` storage on the user's machine.
-
-Response:
-
-```json
-{ "images": ["data:image/jpeg;base64,...", null, "..."] }
-```
-
-> The server fetches each URL directly, so the URLs must be reachable from the server. If the source CDN blocks hotlinking, have the client send already-fetched image bytes instead (future enhancement).
-
-#### Streaming variant
-
-`POST /translate/stream/` takes the **same body** but streams results as **NDJSON** (`application/x-ndjson`) — one line per image, emitted the moment that image finishes (completion order, not request order):
-
-```
-{"index": 2, "image": "data:image/jpeg;base64,..."}
-{"index": 0, "image": null}
-{"index": 1, "image": "data:image/jpeg;base64,..."}
-```
-
-- `index` is the image's position in the request `images` list, so the client can swap each page in place as soon as its line arrives instead of waiting for the whole batch.
-- `image` is `null` for any page that failed.
-- Use this for progressive UIs (the tempomunkey userscript uses it). The non-streaming `/translate/` is kept for simple one-shot callers.
-
----
-
-## Browser userscript (tempomunkey)
-
-[`tempomunkey.user.js`](tempomunkey.user.js) is a Tampermonkey userscript that lets you pick which manga page images to translate (or select all) right on the reader page, toggle visual context, and swap the translations in place.
-
-**Setup**
-1. Install [Tampermonkey](https://www.tampermonkey.net/), then add `tempomunkey.user.js`.
-2. Edit the script header / config: set `@match` to the reader's domain and `API_BASE` to your running server (default `http://localhost:8000`).
-3. Start the API (`docker compose up` or uvicorn) with a provider key in `.env`.
-
-**Use** — open a chapter; a control bar appears at the bottom-right and a checkbox is overlaid on every large image:
-
-| Control | What it does |
-|---------|--------------|
-| checkbox on an image | mark that page for translation |
-| **Select all** / **Clear** | tick / untick every detected page |
-| **Visual context** | also send the page to the LLM as an image for better translation (slower) |
-| **Translate selected** | translate the ticked pages; each page is swapped in place as soon as it finishes (streamed), showing ✓ (done) or ✕ (failed) |
-| **Interrupt** | cancel the in-flight translation request |
-| **Revert all** | restore the original (untranslated) images |
-| **Rescan images** | re-detect images (use after lazy-loaded pages appear) |
-| **Settings** | per-request `provider` / `model` / **source language** / target language / **font** / **text size** / **upscale** (factor + fast/AI) / **custom instruction** / `api_key` (persisted on your machine; sent with each translate request, blank = server default). Set source language to `japanese` to use manga-ocr; raise **text size** (e.g. 1.4) if translations are too small; set **upscale** (e.g. 2) to enlarge low-res pages. The font list is fetched from the server's `GET /fonts/`. |
-
-> Cross-origin/mixed-content (https page → http localhost) is handled via `GM_xmlhttpRequest`. Pages are streamed back via `/translate/stream/` and swapped in place one by one (the script parses the NDJSON in `onprogress`). **Interrupt** stops the client from waiting and frees the UI, but work the server already started keeps running in the background. If the source CDN blocks server-side hotlinking, translation returns `null` (✕) for that page (future: have the script upload image bytes instead of URLs).
+The old hosted API (`main.py`, Docker images) and the Tampermonkey userscript (`tempomunkey.user.js`) are no
+longer used; they are kept on the `archive/userscript-api` branch.
 
 ---
 
@@ -271,7 +136,7 @@ companion app that runs `QualityPipeline` on the user's GPU.
 
 ```powershell
 python -m apps.companion.server          # http://127.0.0.1:8765, accepts requests from extensions only
-# MTVL_DEVICE=cuda|dml|cpu (default: cuda with torch, dml without) -- not DEVICE, which is main.py's
+# MTVL_DEVICE=cuda|dml|cpu (default: cuda with torch, dml without)
 # MODEL=<openrouter model> (default google/gemini-3-flash-preview)
 # Chrome -> chrome://extensions -> Developer mode -> Load unpacked -> apps/extension
 ```
@@ -327,7 +192,6 @@ Options: `--out` (default `eval/scraped`), `--min-width` (default 400), `--selec
 
 ```
 MangaTVL/
-├── main.py                     # FastAPI app (hosted API, userscript client)
 ├── pipeline.py                 # Pipeline + QualityPipeline orchestrators
 ├── manga_translator/
 │   ├── detection/              # YOLO / ONNX detectors, HybridDetection, refine.py (region repairs)
