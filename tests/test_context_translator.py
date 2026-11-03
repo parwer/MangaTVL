@@ -48,6 +48,15 @@ def test_maps_by_tag_and_returns_speaker_source_context():
     assert len(fake.calls) == 1 and fake.calls[0]["image"].startswith("data:image/jpeg;base64,")
 
 
+def test_text_only_sends_no_image_and_says_so():
+    fake = FakeTranslator([{"regions": [{"n": 0, "source": "HELLO THERE", "translation": "หวัดดี"},
+                                        {"n": 1, "source": "WHO ARE YOU?", "translation": "ใคร?"}]}])
+    out, _ = asyncio.run(ContextTranslator(fake, send_image=False).translate(REGIONS, PAGE))
+    assert [r.translated_text for r in out] == ["หวัดดี", "ใคร?"]
+    call = fake.calls[0]
+    assert call["image"] is None and "no image" in call["system"] and "page image" not in call["system"]
+
+
 def test_previous_context_is_sent_and_kept_when_reply_has_none():
     fake = FakeTranslator([{"regions": [{"n": 0, "source": "HELLO THERE", "translation": "a"},
                                         {"n": 1, "source": "WHO ARE YOU?", "translation": "b"}]}])

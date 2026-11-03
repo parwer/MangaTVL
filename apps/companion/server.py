@@ -21,7 +21,7 @@ sys.path.insert(0, str(REPO))
 from pipeline import QualityPipeline, glossary_words  # noqa: E402
 from manga_translator.schemas.interface import TranslationResult  # noqa: E402
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 MODEL = os.getenv("MODEL") or "google/gemini-3-flash-preview"
 # MTVL_DEVICE, not DEVICE: the repo .env sets DEVICE=cpu for main.py, which put the companion's
 # glyph mask and LaMa on the CPU (minutes per page, the whole PC froze)
@@ -184,6 +184,7 @@ class TranslateReq(BaseModel):
     quality: str = "best"
     llm: LLM = LLM()
     context: dict | None = None
+    send_image: bool = True  # False: the LLM gets the OCR text only
 
 
 class AnalyzeReq(BaseModel):
@@ -197,6 +198,7 @@ class JobReq(BaseModel):
     job: str
     llm: LLM = LLM()
     context: dict | None = None  # None: translate the page on its own (no chapter context)
+    send_image: bool = True  # False: the LLM gets the OCR text only (text-only models, fewer tokens)
 
 
 class RenderReq(BaseModel):
@@ -249,7 +251,7 @@ def _start_render(job: dict, results, keep_words=()):
     job["task"] = asyncio.create_task(render())
 
 
-async def _translate_job(job: dict, llm: LLM, context: dict | None) -> dict:
+async def _translate_job(job: dict, llm: LLM, context: dict | None, send_image: bool = True) -> dict:
     """LLM step only; lettering is queued on the GPU and fetched with /v1/result."""
     page = job["page"]
     if not page.ocr:
@@ -265,7 +267,8 @@ async def _translate_job(job: dict, llm: LLM, context: dict | None) -> dict:
     try:
         tr = translator_for(prov, key, llm.model, llm.base_url)
         results = await pipe().translate_page(page, tr, chapter=chapter,
-                                              model=llm.model, from_lang=job["src"], to_lang=job["to_lang"].title())
+                                              model=llm.model, from_lang=job["src"], to_lang=job["to_lang"].title(),
+                                              send_image=send_image)
     except Exception as e:  # provider errors (bad key, quota) go to the badge
         # relay off: its daily quota
         # if prov == "relay" and "429" in str(e):
@@ -285,7 +288,7 @@ async def analyze(req: AnalyzeReq):
 @app.post("/v1/job")
 async def translate_job(req: JobReq):
     """Translate an analysed page; returns the new context as soon as the LLM answers."""
-    return await _translate_job(_job(req.job), req.llm, req.context)
+    return await _translate_job(_job(req.job), req.llm, req.context, req.send_image)
 
 
 @app.get("/v1/result/{jid}")
@@ -310,7 +313,7 @@ async def translate(req: TranslateReq):
     if not a["regions"]:
         JOBS.pop(a["job"], None)
         return {"image": req.image, "context": req.context}
-    t = await _translate_job(job, req.llm, req.context)
+    t = await _translate_job(job, req.llm, req.context, req.send_image)
     if t.get("needs_client_translation"):
         return {**a, "needs_client_translation": True}
     out = await result(a["job"])

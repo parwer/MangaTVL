@@ -77,8 +77,9 @@ def _is_keep(x: dict) -> bool:
 
 class ContextTranslator:
     def __init__(self, translator: AsyncTranslatorBase, *, max_side: int = 1280, jpeg_quality: int = 88,
-                 keep_nontext: bool = False, lock_glossary: bool = False):
+                 keep_nontext: bool = False, lock_glossary: bool = False, send_image: bool = True):
         self.translator = translator
+        self.send_image = send_image  # False: OCR text only (text-only models, fewer tokens)
         self.lock_glossary = lock_glossary  # names keep one spelling across the chapter
         self.keep_nontext = keep_nontext  # experimental: let the model skip logos / kana SFX / art
         self.max_side = max_side
@@ -100,14 +101,18 @@ class ContextTranslator:
         tr = self.translator
         model = model or tr.model
         src, dst = from_lang or tr.from_lang, to_lang or tr.to_lang
-        marked = mark_image(image, [o.detection_result.bbox for o in ocr_result], self.max_side)
         system = get_context_sys_prompt(json.dumps(context, ensure_ascii=False), src, dst, custom_instruction,
-                                        keep_nontext=self.keep_nontext, lock_glossary=self.lock_glossary)
+                                        keep_nontext=self.keep_nontext, lock_glossary=self.lock_glossary,
+                                        with_image=self.send_image)
         inputs = "OCR per region:\n" + "\n".join(region_line(n, o) for n, o in enumerate(ocr_result))
         if capture is not None:
-            capture.update(model=model, system_prompt=system, user_input=inputs, image_attached=True)
+            capture.update(model=model, system_prompt=system, user_input=inputs, image_attached=self.send_image)
         try:
-            raw = await self._call(inputs, convert_img_to_base64(marked, quality=self.jpeg_quality), model, system, capture)
+            marked = None
+            if self.send_image:
+                marked = mark_image(image, [o.detection_result.bbox for o in ocr_result], self.max_side)
+                marked = convert_img_to_base64(marked, quality=self.jpeg_quality)
+            raw = await self._call(inputs, marked, model, system, capture)
         except Exception as e:
             print(f"[context-translate] API call failed: {e}")
             raw = None

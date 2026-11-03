@@ -19,6 +19,7 @@ const DEFAULTS = {
   // relayUrl: "",
   // relayToken: "",
   quality: "best",          // best | fast
+  llmInput: "image",        // image: the AI sees the page | text: OCR text only (text-only models, fewer tokens)
   contextMode: "chapter",   // chapter: story context page to page | page: each page on its own, in parallel
 };
 
@@ -151,7 +152,8 @@ async function analyzePage({ src, dataUrl, pageUrl }) {
 async function translateJob({ job, context }) {
   const s = await getSettings();
   const backend = await findBackend(s);
-  return call(backend, "/v1/job", { job, llm: llmConfig(s, backend.info), context: context || null });
+  return call(backend, "/v1/job", { job, llm: llmConfig(s, backend.info), context: context || null,
+    send_image: s.llmInput !== "text" });
 }
 
 async function jobResult({ job }) {
@@ -167,7 +169,7 @@ async function translateImage({ src, dataUrl, pageUrl, prevContext }) {
   // relay off: if (backend.kind === "relay" && s.relayToken) headers.Authorization = `Bearer ${s.relayToken}`;
   const body = {
     image: await pageImage(src, dataUrl, pageUrl), page_url: pageUrl, from_lang: s.fromLang, to_lang: s.toLang,
-    quality: s.quality, llm, context: prevContext || null,
+    quality: s.quality, llm, context: prevContext || null, send_image: s.llmInput !== "text",
   };
   const r = await fetch(`${backend.base}/v1/translate`, { method: "POST", headers, body: JSON.stringify(body) });
   if (!r.ok) {

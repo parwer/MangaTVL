@@ -78,9 +78,12 @@ def test_job_flow_with_and_without_chapter_context(monkeypatch):
     c, stub = client(monkeypatch, ["HELLO"])
     seen = []
 
-    async def translate_page(page, translator, *, chapter, **kw):
+    sent_image = []
+
+    async def translate_page(page, translator, *, chapter, send_image=True, **kw):
         from manga_translator.schemas.interface import TranslationResult
         seen.append(chapter.get("context"))
+        sent_image.append(send_image)
         chapter["context"] = {"glossary": {"Iori": "อิโอริ"}}
         return [TranslationResult(ocr_result=o, translated_text="สวัสดี") for o in page.ocr]
     stub.translate_page = translate_page
@@ -93,8 +96,9 @@ def test_job_flow_with_and_without_chapter_context(monkeypatch):
     assert c.get(f"/v1/result/{a['job']}", headers=EXT).json()["image"].startswith("data:image/webp")
     assert c.get(f"/v1/result/{a['job']}", headers=EXT).status_code == 404       # fetched once
     b = c.post("/v1/analyze", json={"image": data_url()}, headers=EXT).json()
-    c.post("/v1/job", json={"job": b["job"], "llm": llm, "context": None}, headers=EXT)
+    c.post("/v1/job", json={"job": b["job"], "llm": llm, "context": None, "send_image": False}, headers=EXT)
     assert seen[-1] is None                                                        # page on its own
+    assert sent_image == [True, False]                                             # text-only on request
 
 
 def test_gpu_queue_letters_before_analysing():

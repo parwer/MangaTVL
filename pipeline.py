@@ -342,7 +342,8 @@ class QualityPipeline(Pipeline):
 
     async def translate_page(self, page: "PageState", translator=None, *, chapter: dict | None = None,
                              provider=None, api_key=None, model=None, from_lang=None, to_lang=None,
-                             custom_instruction=None, capture: dict | None = None) -> list[TranslationResult]:
+                             custom_instruction=None, capture: dict | None = None,
+                             send_image: bool = True) -> list[TranslationResult]:
         """Translate a page's regions; ``chapter["context"]`` is read and updated."""
         import time
         from manga_translator.translators.context_translator import ContextTranslator
@@ -354,7 +355,8 @@ class QualityPipeline(Pipeline):
         t = time.perf_counter()
         # fast: no foreign-text filter, so the LLM itself may leave kana SFX / logos alone
         results, chapter["context"] = await ContextTranslator(translator, keep_nontext=self.keep_nontext or page.fast,
-                                                       lock_glossary=getattr(self, "lock_glossary", False)).translate(
+                                                       lock_glossary=getattr(self, "lock_glossary", False),
+                                                       send_image=send_image).translate(
             page.ocr, page.image, context=chapter.get("context"), model=model, from_lang=from_lang,
             to_lang=to_lang, custom_instruction=custom_instruction, capture=capture)
         page.lap("translate", t)
@@ -397,14 +399,15 @@ class QualityPipeline(Pipeline):
                             provider=None, api_key=None, model=None, from_lang=None, to_lang=None,
                             font=None, text_scale=None, upscale=None, upscaler=None,
                             custom_instruction=None, chapter: dict | None = None,
-                            capture: dict | None = None) -> Image.Image:
+                            capture: dict | None = None, send_image: bool = True) -> Image.Image:
         page = self.analyze(image, from_lang)
         self.last_page = page.diagnostics()
         if not page.ocr:
             return page.image
         results = await self.translate_page(page, chapter=chapter, provider=provider, api_key=api_key, model=model,
                                             from_lang=from_lang, to_lang=to_lang,
-                                            custom_instruction=custom_instruction, capture=capture)
+                                            custom_instruction=custom_instruction, capture=capture,
+                                            send_image=send_image)
         rendered = self.finish(page, results, to_lang=to_lang, font=font, text_scale=text_scale,
                                keep_words=glossary_words((chapter or {}).get("context")))
         self.last_page = page.diagnostics()

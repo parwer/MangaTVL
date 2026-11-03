@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const FIELDS = ["toLang", "contextMode", "llmMode", "model", "localUrl", "quality"]; // relay off: "relayUrl"
+const FIELDS = ["toLang", "contextMode", "llmMode", "model", "localUrl", "quality", "llmInput"]; // relay off: "relayUrl"
 
 async function refresh() {
   const st = await chrome.runtime.sendMessage({ type: "status" });
@@ -30,11 +30,12 @@ $("checkLocal").onclick = async () => {
   $("localInfo").textContent = "กำลังตรวจ…";
   const r = await chrome.runtime.sendMessage({ type: "local-models", url: $("localUrl").value.trim() });
   $("localInfo").textContent = r && r.ok
-    ? (r.models.length ? `เจอ ${r.models.length} โมเดล: ${r.models.slice(0, 5).join(", ")} (ใช้ตัวที่รับภาพได้ เช่น qwen3-vl, gemma)` : "ต่อได้ แต่ยังไม่มีโมเดลโหลดไว้")
+    ? (r.models.length ? `เจอ ${r.models.length} โมเดล: ${r.models.slice(0, 5).join(", ")} (ใช้ตัวที่รับภาพได้ เช่น qwen3-vl, gemma หรือเลือก "ข้อความอย่างเดียว")` : "ต่อได้ แต่ยังไม่มีโมเดลโหลดไว้")
     : `ต่อไม่ได้: ${(r && r.error) || "ไม่ทราบสาเหตุ"}`;
 };
 $("toLang").onchange = () => chrome.storage.local.set({ toLang: $("toLang").value });
 $("contextMode").onchange = () => chrome.storage.local.set({ contextMode: $("contextMode").value });
+$("llmInput").onchange = () => chrome.storage.local.set({ llmInput: $("llmInput").value });
 refresh();
 
 // the floating button shows only on sites switched on here (the right-click menu works everywhere)

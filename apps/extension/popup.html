@@ -46,6 +46,7 @@
   <!-- relay off -->
   <label hidden>Relay server (ถ้าองค์กรมีให้)</label><input id="relayUrl" placeholder="https://…" hidden>
   <label>คุณภาพ</label><select id="quality"><option value="best">ดีที่สุด (LaMa + typesetting)</option><option value="fast">เร็ว (ไม่ใช้ LaMa และตัวกรอง SFX ญี่ปุ่น)</option></select>
+  <label>ข้อมูลที่ส่งให้ AI</label><select id="llmInput"><option value="image">ภาพหน้า + ข้อความ (แม่นกว่า)</option><option value="text">ข้อความอย่างเดียว (โมเดลที่ไม่รับภาพ, ประหยัด token)</option></select>
   <button id="save" class="ghost">บันทึก</button>
  </details>
 <script src="popup.js"></script>

@@ -68,11 +68,10 @@ def get_ocr_prompt(data: str):
 
 # --- page-level, context-aware translation (ContextTranslator) -------------------------------
 CONTEXT_SYSTEM_PROMPT = """You are a professional manga/comic localizer translating {from_lang} into {to_lang}.
-You receive the page image. Every text region is marked with a red numbered tag [n],
-and you also get the OCR text for each n (OCR may contain mistakes - fix them from the image).
+{source}
 
 For each region decide:
-- who speaks (use the art: tail direction, panel, face) and their gender/age/attitude,
+- who speaks ({speaker_hint}) and their gender/age/attitude,
 - the right register for {to_lang}. For Thai: choose pronouns (ผม/ฉัน/เรา/ข้า/กู/แก/นาย/เธอ...) and
   sentence-final particles (ครับ/ค่ะ/คะ/นะ/จ้ะ/วะ/เว้ย/สิ/เถอะ...) that fit the speaker's gender,
   age, relationship and emotion. Never mix ครับ and ค่ะ for the same speaker.
@@ -81,7 +80,7 @@ For each region decide:
   a sigh / BREATH -> (ถอนหายใจ). Keep the original's emphasis (!, repeated letters).
   Only words that ARE sounds get this; a label or sign (WATER, EXIT) is translated as a word.
 - each tag gets only the text inside its own region, never a neighbouring sound effect or line.
-- some regions have a 2nd OCR reading; either may be wrong, trust the image.
+- some regions have a 2nd OCR reading; either may be wrong, {alt_hint}.
 - keep each translation about as long as the original so it fits the balloon; break nothing.
 - names: keep the glossary spelling if given.
 {extra}
@@ -116,12 +115,24 @@ GLOSSARY_RULE = """- glossary: put every character, place and term name on this 
 """
 
 
+WITH_IMAGE = dict(
+    source="You receive the page image. Every text region is marked with a red numbered tag [n],\n"
+           "and you also get the OCR text for each n (OCR may contain mistakes - fix them from the image).",
+    speaker_hint="use the art: tail direction, panel, face", alt_hint="trust the image")
+TEXT_ONLY = dict(
+    source="You get no image, only the OCR text of each region [n] in reading order\n"
+           "(OCR may contain mistakes - fix obvious misreadings from the wording and the story).",
+    speaker_hint="infer it from the wording, the order of the lines and the story context",
+    alt_hint="pick the reading that makes sense")
+
+
 def get_context_sys_prompt(context: str, from_lang="English", to_lang="Thai", custom_instruction=None,
-                           keep_nontext=False, lock_glossary=False):
+                           keep_nontext=False, lock_glossary=False, with_image=True):
     extra = KEEP_NONTEXT_RULE.format(from_lang=from_lang) if keep_nontext else ""
     if lock_glossary:
         extra += GLOSSARY_RULE.format(to_lang=to_lang)
     if custom_instruction:
         extra += ("- additional user instruction (highest priority, override the above if they conflict): "
                  f"{custom_instruction}\n")
-    return CONTEXT_SYSTEM_PROMPT.format(from_lang=from_lang, to_lang=to_lang, context=context, extra=extra)
+    return CONTEXT_SYSTEM_PROMPT.format(from_lang=from_lang, to_lang=to_lang, context=context, extra=extra,
+                                        **(WITH_IMAGE if with_image else TEXT_ONLY))
