@@ -156,3 +156,32 @@ def test_guard_restores_a_region_whose_text_survives():
                                                                                          form_type="free_text")])
     assert [i for i, _ in res.reverted] == [0]
     assert (res.clean == img).all()                          # original pixels back
+
+
+def test_no_check_erases_once_without_running_the_mask_model_again():
+    # CPU path: each re-check runs the mask model over the whole page (about 23 s on a CPU)
+    rng = np.random.default_rng(1)
+    img = rng.integers(100, 200, (300, 400, 3), dtype=np.uint8)
+    cv2.putText(img, "BOOM", (100, 160), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 0), 6)
+    rm = cv2.dilate(((img.max(2) < 60) * 255).astype(np.uint8), np.ones((5, 5), np.uint8))
+    calls = []
+    masker = StubMasker(lambda bgr: calls.append(1) or (bgr.max(2) < 60).astype(np.float32))
+    det = [DetectionResult(bbox=[90, 100, 330, 180], form_type="free_text")]
+    res = TextEraser(masker, bare_inpainter(lambda bgr, mask: bgr.copy())).erase(img, [rm], det, check=False)
+    assert calls == [] and res.reverted == []                # no re-check, so nothing reverted either
+
+
+@pytest.mark.parametrize("k,pad", [(4, 1), (2, 0)])
+def test_conv_transpose_as_phase_convs_gives_the_same_output(k, pad):
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "packaging"))
+    from ctd_subpixel import phase_convs
+    torch.manual_seed(0)
+    x, w = torch.randn(1, 5, 6, 7), torch.randn(5, 3, k, k)
+    ref = torch.nn.functional.conv_transpose2d(x, w, stride=2, padding=pad)
+    out = torch.zeros_like(ref)
+    for a, b, wc, (top, left, bottom, right) in phase_convs(w.numpy(), k, pad):
+        xp = torch.nn.functional.pad(x, (left, right, top, bottom))
+        out[:, :, a::2, b::2] = torch.nn.functional.conv2d(xp, torch.from_numpy(wc))
+    assert torch.allclose(out, ref, atol=1e-5)

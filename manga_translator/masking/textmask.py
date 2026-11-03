@@ -6,6 +6,9 @@ import cv2
 import numpy as np
 
 DEFAULT_MODEL = Path(__file__).resolve().parent.parent / "assets" / "models" / "comictextdetector.pt.onnx"
+# same model with ConvTranspose rewritten as plain convs (packaging/ctd_subpixel.py): same output, faster
+# on onnxruntime (CPU 27 -> 24 s, DirectML 46 -> 29 ms); the packaged app ships only this one
+SUBPIXEL_MODEL = DEFAULT_MODEL.with_name("comictextdetector_subpixel.onnx")
 
 
 class TextMasker:
@@ -27,6 +30,8 @@ class TextMasker:
                 pass
         import onnxruntime as ort
         ort.set_default_logger_severity(3)
+        if Path(model_path) == DEFAULT_MODEL and SUBPIXEL_MODEL.exists():
+            model_path = SUBPIXEL_MODEL
         want = {"cuda": "CUDAExecutionProvider", "dml": "DmlExecutionProvider"}.get(device.split(":")[0])
         provs = ([want] if want in ort.get_available_providers() else []) + ["CPUExecutionProvider"]
         so = ort.SessionOptions()
@@ -35,6 +40,13 @@ class TextMasker:
             so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
         self.sess = ort.InferenceSession(str(model_path), so, providers=provs)
         self.inp = self.sess.get_inputs()[0].name
+
+    @property
+    def on_cpu(self) -> bool:
+        """True when the mask model runs on the CPU (no GPU, or DirectML / CUDA unavailable)."""
+        if self.torch_net is not None:
+            return str(self.device).startswith("cpu")
+        return self.sess.get_providers()[0] == "CPUExecutionProvider"
 
     def _run(self, x: np.ndarray):
         if self.torch_net is None:

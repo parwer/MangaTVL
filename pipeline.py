@@ -281,6 +281,11 @@ class QualityPipeline(Pipeline):
         self.lock_glossary = lock_glossary  # one spelling per name across the chapter
         self.last_page: dict = {}  # diagnostics of the last page (timings, regions, reverted)
 
+    @property
+    def cpu_only(self) -> bool:
+        """No GPU for the mask model: the slow CPU path (fewer passes over the page)."""
+        return getattr(self.masker, "on_cpu", False)
+
     def analyze(self, image: Image.Image, from_lang=None, fast=False) -> "PageState":
         """Detect, mask, repair regions, OCR and build per-region glyph masks."""
         return self.analyze_cpu(self.analyze_gpu(image, from_lang, fast), from_lang)
@@ -374,8 +379,9 @@ class QualityPipeline(Pipeline):
 
         t = time.perf_counter()
         keep = [i for i, r in enumerate(results) if (r.translated_text or "").strip()]
+        # no GPU: skip the re-checks after erasing (each runs the mask model over the whole page again)
         erased = self.eraser.erase(pil2cv(page.image), page.masks, [o.detection_result for o in page.ocr], keep,
-                                   fast=page.fast)
+                                   fast=page.fast, check=not self.cpu_only)
         for i, _ in erased.reverted:  # text survived erasing: original pixels are back, don't letter
             results[i].translated_text = ""
         page.lap("inpaint", t)

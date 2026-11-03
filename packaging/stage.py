@@ -6,7 +6,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 OUT = REPO / "packaging" / "build" / "app"
 CODE = ["pipeline.py", "manga_translator", "apps/__init__.py", "apps/companion", "apps/extension"]
-MODELS = ["comictextdetector.pt.onnx", "lama_ft2_512.onnx", "best_diplom.onnx", "bubble_freetext_yolo26s.onnx",
+MODELS = ["comictextdetector_subpixel.onnx", "lama_ft2_512.onnx", "best_diplom.onnx", "bubble_freetext_yolo26s.onnx",
           "baberu"]
 SKIP = {"__pycache__", "models"}  # assets/models is copied selectively (ONNX only)
 
@@ -37,6 +37,10 @@ def main():
     for c in CODE:
         place(REPO / c, OUT / c)
     models = REPO / "manga_translator" / "assets" / "models"
+    if not (models / MODELS[0]).exists():  # the glyph mask model without ConvTranspose (faster on onnxruntime)
+        sys.path.insert(0, str(REPO / "packaging"))
+        from ctd_subpixel import convert
+        convert()
     for m in MODELS:
         place(models / m, OUT / "manga_translator" / "assets" / "models" / m)
     files = [f for f in OUT.rglob("*") if f.is_file()]

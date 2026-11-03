@@ -11,7 +11,9 @@ const DEFAULTS = {
   llmMode: "auto",          // auto | openrouter | gemini | local | builtin
   openrouterKey: "",
   geminiKey: "",
-  model: "",                // blank = backend default for the chosen provider
+  modelOpenrouter: "",      // provider/model, blank = the app's default
+  modelGemini: "",          // model name, blank = the app's default
+  modelLocal: "",           // a model of the Local AI server, blank = one it has installed (vision first)
   localUrl: "",             // Local AI: OpenAI-compatible server; blank = Ollama (http://127.0.0.1:11434/v1)
   toLang: "thai",
   fromLang: "auto",
@@ -24,8 +26,15 @@ const DEFAULTS = {
 };
 
 async function getSettings() {
-  const s = await chrome.storage.local.get(DEFAULTS);
-  return { ...DEFAULTS, ...s };
+  const s = { ...DEFAULTS, ...(await chrome.storage.local.get({ ...DEFAULTS, model: "" })) };
+  if (s.model) { // up to 0.3.1 one Model field served every provider: move it to the provider it names
+    const key = s.model.includes("/") ? "modelOpenrouter" : s.model.startsWith("gemini") ? "modelGemini" : "modelLocal";
+    if (!s[key]) s[key] = s.model;
+    await chrome.storage.local.set({ [key]: s[key] });
+    await chrome.storage.local.remove("model");
+  }
+  delete s.model;
+  return s;
 }
 
 // ---------------------------------------------------------------- OAuth PKCE
@@ -101,11 +110,14 @@ async function findBackend(settings) {
 function llmConfig(s, backendInfo) {
   const mode = s.llmMode;
   if ((mode === "openrouter" || mode === "auto") && s.openrouterKey)
-    return { provider: "openrouter", api_key: s.openrouterKey, model: s.model || null };
+    return { provider: "openrouter", api_key: s.openrouterKey, model: s.modelOpenrouter || null };
   if ((mode === "gemini" || mode === "auto") && s.geminiKey)
-    return { provider: "gemini", api_key: s.geminiKey, model: s.model || null };
+    return { provider: "gemini", api_key: s.geminiKey, model: s.modelGemini || null };
+  // picked explicitly but not set up: say so instead of quietly using another AI
+  if (mode === "openrouter" && !s.openrouterKey) return { provider: "none", missing: "openrouter" };
+  if (mode === "gemini" && !s.geminiKey) return { provider: "none", missing: "gemini" };
   if (mode === "builtin") return { provider: "builtin" }; // Chrome on-device Translator, done in content.js
-  const local = { provider: "local", model: s.model || null, base_url: s.localUrl || null };
+  const local = { provider: "local", model: s.modelLocal || null, base_url: s.localUrl || null };
   if (mode === "local" || (mode === "auto" && s.localUrl)) return local; // the user's own server
   // relay off: free daily quota, no account (apps/relay)
   // if (mode === "auto" && backendInfo && backendInfo.relay) return { provider: "relay" };
@@ -149,11 +161,15 @@ async function analyzePage({ src, dataUrl, pageUrl }) {
     quality: s.quality });
 }
 
+const MISSING_ERRORS = { openrouter: "เลือก OpenRouter ไว้แต่ยังไม่ได้ Sign in — เปิด popup แล้วกด Sign in",
+                         gemini: "เลือก Gemini ไว้แต่ยังไม่ได้ใส่ API key — ใส่ key ใน popup" };
+
 async function translateJob({ job, context }) {
   const s = await getSettings();
   const backend = await findBackend(s);
-  return call(backend, "/v1/job", { job, llm: llmConfig(s, backend.info), context: context || null,
-    send_image: s.llmInput !== "text" });
+  const llm = llmConfig(s, backend.info);
+  if (llm.missing) return { error: MISSING_ERRORS[llm.missing] };
+  return call(backend, "/v1/job", { job, llm, context: context || null, send_image: s.llmInput !== "text" });
 }
 
 async function jobResult({ job }) {
@@ -165,6 +181,7 @@ async function translateImage({ src, dataUrl, pageUrl, prevContext }) {
   const backend = await findBackend(s);
   if (!backend) return { error: "no-backend" };
   const llm = llmConfig(s, backend.info);
+  if (llm.missing) return { error: MISSING_ERRORS[llm.missing] };
   const headers = { "Content-Type": "application/json" };
   // relay off: if (backend.kind === "relay" && s.relayToken) headers.Authorization = `Bearer ${s.relayToken}`;
   const body = {
@@ -189,7 +206,8 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         cachedBackend = null;
         const s = await getSettings();
         const b = await findBackend(s);
-        return reply({ backend: b, llm: llmConfig(s, b && b.info).provider, settings: { ...s, openrouterKey: s.openrouterKey ? "•••" : "", geminiKey: s.geminiKey ? "•••" : "" } });
+        const llm = llmConfig(s, b && b.info);
+        return reply({ backend: b, llm: llm.provider, missing: llm.missing, settings: { ...s, openrouterKey: s.openrouterKey ? "•••" : "", geminiKey: s.geminiKey ? "•••" : "" } });
       }
       if (msg.type === "translate") return reply(await translateImage(msg));
       if (msg.type === "analyze") return reply(await analyzePage(msg));

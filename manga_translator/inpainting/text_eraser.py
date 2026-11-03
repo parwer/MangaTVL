@@ -37,8 +37,11 @@ class TextEraser:
         return refine_mask(clean, self.masker.predict(clean), thresh=0.4) & zone
 
     def erase(self, bgr: np.ndarray, masks: list[np.ndarray], dets: list[DetectionResult],
-              keep: list[int] | None = None, fast: bool = False) -> EraseResult:
-        """Erase the regions in ``keep``, repair, and revert regions whose text survives (``fast``: no LaMa)."""
+              keep: list[int] | None = None, fast: bool = False, check: bool = True) -> EraseResult:
+        """Erase the regions in ``keep``, repair, and revert regions whose text survives (``fast``: no LaMa).
+
+        ``check=False`` skips the repair / guard passes: each runs the mask model on the whole page again
+        (about 23 s per pass on a CPU)."""
         keep = list(range(len(masks))) if keep is None else list(keep)
         masks = [m.copy() for m in masks]
         H, W = bgr.shape[:2]
@@ -58,6 +61,8 @@ class TextEraser:
                     continue
             hole |= rm
         clean = self.inpainter.erase(pre, hole, fast=fast)
+        if not check:
+            return EraseResult(clean, masks)
 
         # repair / guard zone per region: a 41 px halo, clipped to the balloon (+7 px) if any
         zone = np.zeros((H, W), np.uint8)

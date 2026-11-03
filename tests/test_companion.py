@@ -133,8 +133,17 @@ def test_local_ai_url_points_at_another_openai_compatible_server(monkeypatch):
     tr = srv.translator_for("local", None, None, "http://127.0.0.1:1234/v1/")   # LM Studio
     assert str(tr.client.base_url).rstrip("/") == "http://127.0.0.1:1234/v1" and tr.model == "gemma-4-26b-a4b-it"
     assert srv.translator_for("local", None, "picked", "http://127.0.0.1:1234/v1").model == "picked"
-    ollama = srv.translator_for("local", None, None)                             # blank URL: Ollama default
-    assert "11434" in str(ollama.client.base_url) and ollama.model == "qwen3-vl:4b-instruct"
+    ollama = srv.translator_for("local", None, None)                             # blank URL: Ollama
+    assert "11434" in str(ollama.client.base_url) and ollama.model == "gemma-4-26b-a4b-it"   # installed, reads images
+
+
+def test_blank_local_model_picks_an_installed_one(monkeypatch):
+    assert srv.pick_local_model(["nomic-embed-text", "qwen3:4b", "gemma4:e2b-it-qat"]) == "gemma4:e2b-it-qat"
+    assert srv.pick_local_model(["nomic-embed-text", "qwen3:4b"]) == "qwen3:4b"   # no vision model: first one
+    def down(base):
+        raise ConnectionError("refused")
+    monkeypatch.setattr(srv, "local_models", down)
+    assert srv.translator_for("local", None, None).model == "qwen3-vl:4b-instruct"  # server down: the default
 
 
 def test_local_models_endpoint_reports_an_unreachable_server(monkeypatch):
@@ -144,3 +153,11 @@ def test_local_models_endpoint_reports_an_unreachable_server(monkeypatch):
     monkeypatch.setattr(srv, "local_models", down)
     r = c.get("/v1/local-models", params={"url": "http://127.0.0.1:1234/v1"}, headers=EXT).json()
     assert r == {"ok": False, "error": "refused", "models": []}
+
+
+def test_cpu_only_app_runs_every_page_at_fast_quality(monkeypatch):
+    c, stub = client(monkeypatch, ["HELLO"])
+    stub.cpu_only = True
+    a = c.post("/v1/analyze", json={"image": data_url(), "quality": "best"}, headers=EXT).json()
+    assert srv.JOBS[a["job"]]["page"].fast is True
+    assert c.get("/v1/health", headers=EXT).json()["cpu_only"] is True

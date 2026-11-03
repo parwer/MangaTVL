@@ -21,7 +21,7 @@ sys.path.insert(0, str(REPO))
 from pipeline import QualityPipeline, glossary_words  # noqa: E402
 from manga_translator.schemas.interface import TranslationResult  # noqa: E402
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 MODEL = os.getenv("MODEL") or "google/gemini-3-flash-preview"
 # MTVL_DEVICE, not DEVICE: the repo .env sets DEVICE=cpu for main.py, which put the companion's
 # glyph mask and LaMa on the CPU (minutes per page, the whole PC froze)
@@ -142,16 +142,29 @@ def local_models(base_url: str) -> list[str]:
     return [m["id"] for m in r.json().get("data", [])]
 
 
+VISION_HINTS = ("-vl", "vl:", "gemma3", "gemma4", "gemma-3", "gemma-4", "llava", "minicpm-v", "pixtral",
+                "vision", "llama4", "mistral-small3")
+
+
+def pick_local_model(models: list[str]) -> str | None:
+    """An installed model for a blank Model field: one that reads images first, else the first one."""
+    usable = [m for m in models if "embed" not in m.lower()]
+    return next((m for m in usable if any(h in m.lower() for h in VISION_HINTS)), usable[0] if usable else None)
+
+
 def translator_for(provider: str, api_key: str | None, model: str | None, base_url: str | None = None):
     """A translator for the provider; local (and the relay, when on) are OpenAI-compatible endpoints."""
     if provider in OPENAI_COMPATIBLE:
         from openai import AsyncOpenAI
         from manga_translator.translators import AsyncOpenRouterTranslator
         base, default = OPENAI_COMPATIBLE[provider]
-        if provider == "local" and base_url and base_url.rstrip("/") != base:
-            base = base_url.rstrip("/")
-            if not model:  # another server: one of its own models (the Ollama default would not exist there)
-                model = (local_models(base) or [None])[0]
+        if provider == "local":
+            base = (base_url or base).rstrip("/")
+            if not model:  # blank: what this server really has (the default may not be installed)
+                try:
+                    model = pick_local_model(local_models(base))
+                except Exception:
+                    model = None
         client = AsyncOpenAI(base_url=base, api_key=api_key or "none")
         return AsyncOpenRouterTranslator(client=client, model=model or default)
     tr = pipe()._get_translator(provider, pipe()._resolve_key(provider, api_key))
@@ -215,7 +228,9 @@ def health():
         import onnxruntime as ort
         gpu = "DmlExecutionProvider" in ort.get_available_providers()
     # relay off: "relay": relay_ok() and "relay" in providers
-    return {"version": VERSION, "gpu": gpu, "local_llm": ollama_ok(), "relay": False, "jobs": True,
+    # no GPU: each page takes about 30 s on the CPU and always runs at "fast" quality
+    cpu_only = getattr(PIPE, "cpu_only", False) if PIPE is not None else (DEVICE == "cpu" or not gpu)
+    return {"version": VERSION, "gpu": gpu, "cpu_only": cpu_only, "local_llm": ollama_ok(), "relay": False, "jobs": True,
             "providers": ["openrouter", "gemini", "local", "builtin"]}
 
 
@@ -226,7 +241,8 @@ def _expire():
 
 async def _analyze(image: str, from_lang: str, to_lang: str, quality: str = "best") -> dict:
     src = None if from_lang == "auto" else from_lang
-    page = await GPU.run(ANALYZE, pipe().analyze_gpu, decode(image), src, quality == "fast")
+    fast = quality == "fast" or getattr(pipe(), "cpu_only", False)  # CPU: LaMa adds up to ~20 s a page
+    page = await GPU.run(ANALYZE, pipe().analyze_gpu, decode(image), src, fast)
     # second OCR reading is CPU only: off the GPU queue so the next page's detection runs meanwhile
     page = await asyncio.to_thread(pipe().analyze_cpu, page, src)
     _expire()
