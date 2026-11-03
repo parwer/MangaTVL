@@ -33,7 +33,7 @@ Download both files from the [latest release](https://github.com/parwer/MangaTVL
 
 1. Run `MangaTVL-Companion-Setup-<version>.exe`. It installs for your user only, so it needs no admin rights and no Python.
 2. When it finishes, the app starts and shows an icon in the system tray. It loads its models on first start, which takes a few seconds.
-3. Optional: tick **เปิดพร้อม Windows** in the tray menu to start the app with Windows.
+3. Optional: turn on the start-with-Windows option in the tray icon's menu.
 
 ### 2. Browser extension
 
@@ -48,13 +48,13 @@ Download both files from the [latest release](https://github.com/parwer/MangaTVL
 Click the MangaTVL icon to open the popup. It should say the Companion app is ready. Then do one of these:
 
 - Click **Sign in with OpenRouter** and approve. The extension receives a key by itself.
-- Or open **ขั้นสูง** (advanced) and enter a Gemini API key.
+- Or open the advanced section and enter a Gemini API key.
 - Or run a local model (for example `ollama pull qwen3-vl:4b-instruct`) and choose **Local AI**.
 
 ## Use
 
 1. Open a chapter on a manga site.
-2. In the popup, click **เปิดใช้บน &lt;site&gt;** to show the translate button on that site.
+2. In the popup, click the button that turns MangaTVL on for that site. This shows the translate button on its pages.
 3. Click the floating button to translate the pages. You can also right-click an image and choose **Translate this image (MangaTVL)**.
 
 ## Update
