@@ -245,3 +245,12 @@ eval/
 tests/test_judge.py
 postman_collection.json
 report.md
+
+# exam slides: contain licensed eval-chapter pages, local only
+docs/slides/
+
+# kept locally, not part of the published app: report, test site, training and scraping scripts
+docs/
+apps/testsite/
+training/
+scrape_images.py

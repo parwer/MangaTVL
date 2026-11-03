@@ -1,6 +1,6 @@
 # MangaTVL
 
-A FastAPI service that automatically translates manga / comic pages from **English → Thai** (configurable) through a 5-stage computer-vision + LLM pipeline. Its core idea: translation is done by a **VLM (vision-language model)** that receives the full page image alongside the OCR'd text, so it can use the surrounding art, panel layout, and visual context to translate more accurately — not just the raw text in isolation. The pipeline detects speech bubbles, reads the text, sends both the text and the page image to the LLM for context-aware translation, erases the original text, and renders the translation back onto the image.
+A FastAPI service that automatically translates manga / comic pages from **English(or any that llm support) → Thai** (configurable) through a 5-stage computer-vision + LLM pipeline. Its core idea: translation is done by a **VLM (vision-language model)** that receives the full page image alongside the OCR'd text, so it can use the surrounding art, panel layout, and visual context to translate more accurately — not just the raw text in isolation. The pipeline detects speech bubbles, reads the text, sends both the text and the page image to the LLM for context-aware translation, erases the original text, and renders the translation back onto the image.
 
 ---
 
@@ -161,33 +161,6 @@ ONNX detection, ONNX LaMa, RapidOCR (Baberu for Japanese) and DirectML.
 
 ---
 
-## Training
-
-[`training/`](training/README.md): the free-text YOLO26 detector (dataset merge, training, evaluation) and the
-LaMa fine-tune (synthetic lettering, training, ONNX export).
-
----
-
-## Scraping an evaluation set
-
-[`scrape_images.py`](scrape_images.py) collects page images into a folder so you can build a test set for the translator. It drives a real (headless) browser via **Playwright**, scrolls to trigger lazy-loading, grabs `<img>`s ≥ `--min-width` in reading order, and downloads them through the browser session (cookies + referer) to get past hotlink protection. SVG/non-raster images are skipped.
-
-```powershell
-# one-time setup
-..\MangaTVL_ENV\python.exe -m pip install playwright
-..\MangaTVL_ENV\python.exe -m playwright install chromium
-
-# scrape one or more pages -> eval/scraped/<page-slug>/001.jpg, 002.jpg, ...
-..\MangaTVL_ENV\python.exe scrape_images.py "https://reader.example/chapter/1"
-..\MangaTVL_ENV\python.exe scrape_images.py --urls-file urls.txt --min-width 500 --limit 20
-```
-
-It force-loads lazy images (promotes `data-src` → `src`, scrolls to the bottom) so chapters that defer off-screen pages still get fully captured.
-
-Options: `--out` (default `eval/scraped`), `--min-width` (default 400), `--selector` (CSS, e.g. `img.comic-image`, for precision when a page has many non-content images), `--limit` per page, `--scroll-rounds`, `--delay`, `--headful` (show the window, e.g. to pass a captcha). Output under `eval/scraped/` is gitignored.
-
----
-
 ## Project layout
 
 ```
@@ -205,7 +178,6 @@ MangaTVL/
 │   └── assets/                 # fonts, models (not committed)
 ├── apps/                       # extension, companion app, relay
 ├── packaging/                  # torch-free companion build
-├── training/                   # YOLO + LaMa training scripts
 └── tests/                      # pytest suite (no model files or API keys needed)
 ```
 
