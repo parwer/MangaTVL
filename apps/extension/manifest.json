@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MangaTVL — one-click manga translator",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Translate manga pages in place. No API-key copy/paste: sign in with OpenRouter, or run fully local.",
   "permissions": ["storage", "identity", "contextMenus", "activeTab", "scripting"],
   "host_permissions": ["<all_urls>"],
