@@ -49,3 +49,10 @@ def test_ocr_engine_name_unknown_returns_default():
     assert ocr_engine_name("klingon") == "easyocr"
     assert ocr_engine_name(None) == "easyocr"
     assert ocr_engine_name("klingon", default="xx") == "xx"
+
+
+def test_every_source_language_has_an_ocr_model():
+    from manga_translator.ocr.rapidocr_engine import LANGS
+    for lang, entry in load_language_map().items():
+        if not lang.startswith("_"):
+            assert entry["easyocr"] in LANGS, lang

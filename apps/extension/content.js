@@ -55,7 +55,9 @@
 
   // Chrome built-in on-device Translator (no account, no key, offline). One per language pair:
   // create() needs a user click while its model still has to be downloaded, so start() warms it up.
-  const ISO = { thai: "th", english: "en", japanese: "ja", korean: "ko", chinese: "zh" };
+  const ISO = { thai: "th", english: "en", japanese: "ja", korean: "ko", chinese: "zh", chinese_traditional: "zh-Hant",
+               vietnamese: "vi", indonesian: "id", french: "fr", german: "de", spanish: "es", italian: "it",
+               portuguese: "pt", russian: "ru" };
   const translators = {};
   const BUILTIN_ERRORS = {
     "builtin-missing": "เบราว์เซอร์นี้ไม่มีตัวแปลในตัวของ Chrome — เลือก AI อื่นใน popup",
@@ -212,7 +214,7 @@
     const s = await send({ type: "settings" });
     mode = s.contextMode || "chapter";
     // inside the click: the built-in translator may need it to download its model
-    if (s.llmMode === "builtin" && "Translator" in self) getTranslator("english", s.toLang).catch(() => {});
+    if (s.llmMode === "builtin" && "Translator" in self) getTranslator(s.fromLang || "english", s.toLang).catch(() => {});
     notice = ""; on = true; failed = 0; go.textContent = "หยุด"; fab.hidden = false;
     observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] });
     document.addEventListener("load", onLoad, true);

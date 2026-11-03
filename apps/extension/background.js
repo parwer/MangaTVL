@@ -16,7 +16,7 @@ const DEFAULTS = {
   modelLocal: "",           // a model of the Local AI server, blank = one it has installed (vision first)
   localUrl: "",             // Local AI: OpenAI-compatible server; blank = Ollama (http://127.0.0.1:11434/v1)
   toLang: "thai",
-  fromLang: "auto",
+  fromLang: "english",
   // relay off: a hosted backend in place of the app (needs the analyze / job / result flow there too)
   // relayUrl: "",
   // relayToken: "",
@@ -34,6 +34,7 @@ async function getSettings() {
     await chrome.storage.local.remove("model");
   }
   delete s.model;
+  if (s.fromLang === "auto") s.fromLang = "english"; // up to 0.3.2 "auto" meant English
   return s;
 }
 
@@ -219,7 +220,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         const q = msg.url ? `?url=${encodeURIComponent(msg.url)}` : "";
         return reply(await call(b, `/v1/local-models${q}`));
       }
-      if (msg.type === "settings") return reply(await getSettings().then((s) => ({ contextMode: s.contextMode, llmMode: s.llmMode, toLang: s.toLang })));
+      if (msg.type === "settings") return reply(await getSettings().then((s) => ({ contextMode: s.contextMode, llmMode: s.llmMode, fromLang: s.fromLang, toLang: s.toLang })));
       if (msg.type === "render") { // second half of the "builtin" flow
         const b = await findBackend(await getSettings());
         const r = await fetch(`${b.base}/v1/render`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(msg.payload) });

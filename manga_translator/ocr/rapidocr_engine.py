@@ -5,7 +5,9 @@ from PIL import Image
 from ..schemas.interface import DetectionResult, OCRResult
 from .ocr_engine import OCREngine
 
-LANGS = {"en": "EN", "th": "TH", "ko": "KOREAN", "ch": "CH", "ch_sim": "CH", "zh": "CH", "ru": "CYRILLIC", "latin": "LATIN"}
+# easyocr codes (languages.json) -> PP-OCRv5 rec model; the ch model reads traditional Chinese and kana too
+LANGS = {"en": "EN", "th": "TH", "ko": "KOREAN", "ch": "CH", "ch_sim": "CH", "ch_tra": "CH", "zh": "CH", "ja": "CH",
+         "ru": "ESLAV", "latin": "LATIN", **{c: "LATIN" for c in ("vi", "fr", "de", "es", "it", "pt", "id")}}
 
 
 def reading_order(boxes, texts):

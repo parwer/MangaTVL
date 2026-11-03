@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const FIELDS = ["toLang", "contextMode", "llmMode", "localUrl", "quality", "llmInput"]; // relay off: "relayUrl"
+const FIELDS = ["fromLang", "toLang", "contextMode", "llmMode", "localUrl", "quality", "llmInput"]; // relay off: "relayUrl"
 // the Model field follows the provider in use: each keeps its own model and its own naming
 const MODEL_UI = {
   openrouter: { key: "modelOpenrouter", label: "Model ของ OpenRouter", placeholder: "ผู้ให้บริการ/ชื่อโมเดล เช่น google/gemini-3-flash-preview",
@@ -110,6 +110,7 @@ $("llmMode").onchange = async () => {
 $("modelLocal").onchange = saveModel;
 $("modelText").onchange = saveModel;
 $("toLang").onchange = () => chrome.storage.local.set({ toLang: $("toLang").value });
+$("fromLang").onchange = () => chrome.storage.local.set({ fromLang: $("fromLang").value });
 $("contextMode").onchange = () => chrome.storage.local.set({ contextMode: $("contextMode").value });
 $("llmInput").onchange = () => chrome.storage.local.set({ llmInput: $("llmInput").value });
 refresh();

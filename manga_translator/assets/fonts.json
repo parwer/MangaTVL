@@ -4,8 +4,10 @@
     "thai": "mali",
     "japanese": "yusei_magic",
     "chinese": "zhi_mang_xing",
-    "chinese_traditional": "zhi_mang_xing",
+    "chinese_traditional": "lxgw_wenkai_tc",
     "korean": "nanum_pen",
+    "russian": "neucha",
+    "vietnamese": "patrick_hand",
     "latin": "comic_neue"
   },
   "fonts": [
@@ -20,6 +22,8 @@
     { "key": "patrick_hand",     "file": "PatrickHand-Regular.ttf",   "label": "Patrick Hand",                 "scripts": ["latin"] },
     { "key": "yusei_magic",      "file": "YuseiMagic-Regular.ttf",    "label": "Yusei Magic (Japanese)",       "scripts": ["latin", "japanese"] },
     { "key": "zhi_mang_xing",    "file": "ZhiMangXing-Regular.ttf",   "label": "Zhi Mang Xing (Chinese)",      "scripts": ["latin", "chinese"] },
-    { "key": "nanum_pen",        "file": "NanumPenScript-Regular.ttf","label": "Nanum Pen (Korean)",           "scripts": ["latin", "korean"] }
+    { "key": "nanum_pen",        "file": "NanumPenScript-Regular.ttf","label": "Nanum Pen (Korean)",           "scripts": ["latin", "korean"] },
+    { "key": "neucha",           "file": "Neucha-Regular.ttf",        "label": "Neucha (Cyrillic)",            "scripts": ["latin", "cyrillic"] },
+    { "key": "lxgw_wenkai_tc",   "file": "LXGWWenKaiTC-Regular.ttf",  "label": "LXGW WenKai TC (Traditional Chinese)", "scripts": ["latin", "chinese"] }
   ]
 }

@@ -239,6 +239,11 @@ def _expire():
         JOBS.pop(jid, None)
 
 
+def lang_label(name: str | None) -> str | None:
+    """Language name for the LLM prompt ("chinese_traditional" -> "Chinese Traditional")."""
+    return name.replace("_", " ").title() if name else None
+
+
 async def _analyze(image: str, from_lang: str, to_lang: str, quality: str = "best") -> dict:
     src = None if from_lang == "auto" else from_lang
     fast = quality == "fast" or getattr(pipe(), "cpu_only", False)  # CPU: LaMa adds up to ~20 s a page
@@ -283,7 +288,7 @@ async def _translate_job(job: dict, llm: LLM, context: dict | None, send_image: 
     try:
         tr = translator_for(prov, key, llm.model, llm.base_url)
         results = await pipe().translate_page(page, tr, chapter=chapter,
-                                              model=llm.model, from_lang=job["src"], to_lang=job["to_lang"].title(),
+                                              model=llm.model, from_lang=lang_label(job["src"]), to_lang=lang_label(job["to_lang"]),
                                               send_image=send_image)
     except Exception as e:  # provider errors (bad key, quota) go to the badge
         # relay off: its daily quota

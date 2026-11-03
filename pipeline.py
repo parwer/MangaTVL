@@ -335,11 +335,12 @@ class QualityPipeline(Pipeline):
         return page
 
     def _second_reader(self, from_lang):
-        """Baberu crop OCR (vertical lettering, foreign-script check), or None (CJK source or no model files)."""
+        """Baberu crop OCR (vertical lettering, foreign-script check), or None (non-Latin source or no model files)."""
         from manga_translator.ocr.baberu_engine import MODEL_DIR, BaberuOCR
         from manga_translator.utils.lang import canonical_name
-        cjk = {"japanese", "chinese", "chinese_traditional", "korean"}
-        if canonical_name(from_lang or self.from_lang) in cjk:
+        # its re-reads replace letterless reads with Latin text: wrong for Korean, Russian, Thai or CJK pages
+        latin = {"english", "french", "german", "spanish", "italian", "portuguese", "indonesian", "vietnamese"}
+        if canonical_name(from_lang or self.from_lang) not in latin:
             return None
         if getattr(self, "_baberu", None) is None and (MODEL_DIR / "onnx").exists():
             self._baberu = BaberuOCR()

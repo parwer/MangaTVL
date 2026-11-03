@@ -49,3 +49,18 @@ def test_bold_face_for_emphasis():
     assert os.path.isfile(bold_font_path("mali"))
     assert bold_font_path("bangers") is None          # no bold registered
     assert bold_font_path(None, lang="english") is None
+
+
+SAMPLES = {"english": "Where?", "japanese": "どこ行くの", "korean": "어디 가", "chinese": "你去哪里",
+           "chinese_traditional": "你要去哪裡", "thai": "ไปไหน", "vietnamese": "Bạn đi đâu", "indonesian": "Mau ke mana",
+           "french": "Où vas-tu", "german": "Wohin gehst", "spanish": "¿Adónde vas?", "italian": "Dove vai",
+           "portuguese": "Aonde você vai", "russian": "Куда ты идёшь"}
+
+
+def test_every_target_language_default_font_has_its_letters():
+    from fontTools.ttLib import TTFont
+    from manga_translator.utils.lang import load_language_map
+    assert set(SAMPLES) == {k for k in load_language_map() if not k.startswith("_")}
+    for lang, text in SAMPLES.items():
+        cmap = TTFont(font_path(None, lang=lang)).getBestCmap()
+        assert [c for c in text if c != " " and ord(c) not in cmap] == [], lang
