@@ -21,7 +21,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from pipeline import QualityPipeline, glossary_words  # noqa: E402
 from manga_translator.schemas.interface import TranslationResult  # noqa: E402
-from manga_translator.translators import offline_mt  # noqa: E402
+from manga_translator.translators import bing_web, offline_mt  # noqa: E402
 
 VERSION = "0.3.4"
 MODEL = os.getenv("MODEL") or "google/gemini-3-flash-preview"
@@ -298,13 +298,19 @@ async def _translate_job(job: dict, llm: LLM, context: dict | None, send_image: 
     # relay off: zero-account tier
     # if prov == "relay" or (prov == "none" and relay_ok()):
     #     prov, key = "relay", relay_token()
-    if prov in ("none", "builtin"):  # free and offline: the app's own model, the same in every browser
-        if not offline_mt.available():  # an app built without it: Chrome's on-device Translator in the extension
-            return {"needs_client_translation": True, "context": context}
+    if prov in ("none", "builtin"):  # free, no account: Bing Translator, else the app's own offline model
+        texts = None
         try:
-            texts = await asyncio.to_thread(offline_mt.translate, [o.text for o in page.ocr], job["src"], job["to_lang"])
-        except Exception as e:
-            raise HTTPException(502, f"offline translator: {e}") from e
+            texts = await asyncio.to_thread(bing_web.translate, [o.text for o in page.ocr], job["src"], job["to_lang"])
+        except Exception as e:  # no internet, or Bing changed or refused
+            print(f"built-in translator: Bing failed ({e}); using the offline model", flush=True)
+        if texts is None:
+            if not offline_mt.available():  # an app built without it: Chrome's on-device Translator in the extension
+                return {"needs_client_translation": True, "context": context}
+            try:
+                texts = await asyncio.to_thread(offline_mt.translate, [o.text for o in page.ocr], job["src"], job["to_lang"])
+            except Exception as e:
+                raise HTTPException(502, f"offline translator: {e}") from e
         results = [TranslationResult(ocr_result=o, translated_text=t) for o, t in zip(page.ocr, texts)]
         _start_render(job, results)
         return {"context": context, "bubbles": [{"n": n, "speaker": "", "text": t} for n, t in enumerate(texts)]}

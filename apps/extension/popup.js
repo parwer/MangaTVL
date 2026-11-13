@@ -13,7 +13,7 @@ const LLM_HINTS = {
   openrouter: "One account for many AI models. Sign in below.",
   gemini: "Google's AI, with your own API key.",
   local: "Runs on your own PC: free, private and offline. Needs Ollama or LM Studio.",
-  builtin: "Free and offline, in every browser, with no account and no limits. It only sees the text, so results are basic.",
+  builtin: "Free, with no account, in every browser. Uses Bing Translator online; without internet, a basic offline translator. It only sees the text, not the page.",
 };
 const CONTEXT_HINTS = {
   chapter: "Keeps names and the way characters talk consistent from page to page. Pages are translated in order.",
@@ -87,11 +87,10 @@ async function refresh() {
   } else {
     const model = st.llm === "openrouter" ? settings.modelOpenrouter : st.llm === "gemini" ? settings.modelGemini
       : st.llm === "local" ? settings.modelLocal : "";
-    const detail = st.llm === "builtin" ? "Free and offline. It only sees the text, so results are basic."
+    const detail = st.llm === "builtin" ? "Free, no account. Bing Translator online, with an offline backup."
       : model ? `Model: ${model}` : st.llm === "local" ? "Model: picked automatically" : "Connected";
-    check("c-ai", st.llm === "builtin" ? "warn" : "ok", `AI: ${AI_NAMES[st.llm]}`, detail,
+    check("c-ai", "ok", `AI: ${AI_NAMES[st.llm]}`, detail,
       [{ label: "Change", fn: () => openSettings("llmMode") }]);
-    if (st.llm === "builtin") warn = true;
     if (st.llm === "local" && b && info.jobs) checkLocalAi(); // is the server up? (answers a moment later)
   }
 
