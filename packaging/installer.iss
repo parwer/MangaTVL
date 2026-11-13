@@ -28,7 +28,6 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Tasks]
-Name: "autostart"; Description: "Start with Windows"
 Name: "desktopicon"; Description: "Desktop shortcut"; Flags: unchecked
 
 [Files]
@@ -39,8 +38,8 @@ Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Registry]
-; same value as the tray menu's "Start with Windows" (apps/companion/tray.py RUN_NAME)
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#AppName}"; ValueData: """{app}\{#AppExe}"""; Tasks: autostart; Flags: uninsdeletevalue
+; the app no longer starts with Windows: remove the entry that versions up to 0.3.3 could add
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "{#AppName}"; Flags: deletevalue uninsdeletevalue
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Start MangaTVL Companion now"; Flags: nowait postinstall

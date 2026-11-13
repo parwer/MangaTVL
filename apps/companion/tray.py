@@ -11,8 +11,6 @@ from PIL import Image, ImageDraw
 
 APP_DIR = Path(os.getenv("APPDATA", str(Path.home()))) / "MangaTVL"
 LOG = APP_DIR / "companion.log"
-RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-RUN_NAME = "MangaTVL Companion"  # the installer's "start with Windows" task writes the same value
 PORT = int(os.getenv("MTVL_PORT", "8765"))
 RELEASES_URL = "https://github.com/parwer/MangaTVL/releases/latest"
 COLORS = {"brand": (226, 51, 74, 255), "ready": (46, 160, 67, 255), "loading": (214, 138, 0, 255),
@@ -41,28 +39,6 @@ def port_in_use(port: int) -> bool:
 
 def message(text: str):
     ctypes.windll.user32.MessageBoxW(None, text, "MangaTVL Companion", 0x40)
-
-
-def autostart() -> bool:
-    import winreg
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as k:
-            winreg.QueryValueEx(k, RUN_NAME)
-            return True
-    except OSError:
-        return False
-
-
-def set_autostart(on: bool):
-    import winreg
-    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
-        if on:
-            winreg.SetValueEx(k, RUN_NAME, 0, winreg.REG_SZ, f'"{sys.executable}"')
-        else:
-            try:
-                winreg.DeleteValue(k, RUN_NAME)
-            except OSError:
-                pass
 
 
 def main():
@@ -108,8 +84,6 @@ def main():
     menu = pystray.Menu(
         pystray.MenuItem(lambda _: state["text"], None, enabled=False),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Start with Windows", lambda _i, _m: set_autostart(not autostart()),
-                         checked=lambda _: autostart(), visible=getattr(sys, "frozen", False)),
         pystray.MenuItem("Get the latest version", lambda _i, _m: webbrowser.open(RELEASES_URL)),
         pystray.MenuItem("Open log file", lambda _i, _m: subprocess.Popen(["notepad", str(LOG)])),
         pystray.Menu.SEPARATOR,
