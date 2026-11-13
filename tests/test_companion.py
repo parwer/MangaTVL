@@ -57,8 +57,35 @@ def test_page_without_text_is_returned_unchanged(monkeypatch):
     assert r == {"image": url, "context": {"a": 1}}
 
 
-def test_builtin_flow_hands_text_to_the_extension_then_renders(monkeypatch):
+def no_bing(monkeypatch):
+    def down(texts, from_lang, to_lang):
+        raise ConnectionError("no internet")
+    monkeypatch.setattr(srv.bing_web, "translate", down)
+
+
+def test_builtin_translates_with_bing_in_the_app(monkeypatch):
     c, stub = client(monkeypatch, ["HELLO", "BYE"])
+    seen = []
+    monkeypatch.setattr(srv.bing_web, "translate", lambda texts, f, t: seen.append((texts, f, t)) or ["สวัสดี", "ลาก่อน"])
+    r = c.post("/v1/translate", json={"image": data_url(), "llm": {"provider": "builtin"}, "from_lang": "english", "to_lang": "thai"}, headers=EXT).json()
+    assert seen == [(["HELLO", "BYE"], "english", "thai")]
+    assert [b["text"] for b in r["bubbles"]] == ["สวัสดี", "ลาก่อน"] and "needs_client_translation" not in r
+    assert r["image"].startswith("data:image/webp;base64,") and stub.finished == [["สวัสดี", "ลาก่อน"]]
+
+
+def test_builtin_falls_back_to_the_offline_model_without_bing(monkeypatch):
+    c, stub = client(monkeypatch, ["HELLO", "BYE"])
+    no_bing(monkeypatch)
+    monkeypatch.setattr(srv.offline_mt, "available", lambda: True)
+    monkeypatch.setattr(srv.offline_mt, "translate", lambda texts, f, t: [x.lower() for x in texts])
+    r = c.post("/v1/translate", json={"image": data_url(), "llm": {"provider": "none"}}, headers=EXT).json()
+    assert [b["text"] for b in r["bubbles"]] == ["hello", "bye"] and stub.finished == [["hello", "bye"]]
+
+
+def test_builtin_without_bing_or_offline_model_hands_text_to_the_extension(monkeypatch):
+    c, stub = client(monkeypatch, ["HELLO", "BYE"])
+    no_bing(monkeypatch)
+    monkeypatch.setattr(srv.offline_mt, "available", lambda: False)
     r = c.post("/v1/translate", json={"image": data_url(), "llm": {"provider": "builtin"}}, headers=EXT).json()
     assert r["needs_client_translation"] and [b["text"] for b in r["bubbles"]] == ["HELLO", "BYE"]
     out = c.post("/v1/render", json={"job": r["job"], "translations": ["สวัสดี", "ลาก่อน"]}, headers=EXT).json()
