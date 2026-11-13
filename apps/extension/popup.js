@@ -10,7 +10,6 @@ const MODEL_UI = {
   local: { key: "modelLocal", label: "Local AI model", hint: "Pick one of the models you have installed." },
 };
 const LLM_HINTS = {
-  auto: "Uses what you've connected: OpenRouter first, then Gemini, then Local AI. With none, the built-in offline translator.",
   openrouter: "One account for many AI models. Sign in below.",
   gemini: "Google's AI, with your own API key.",
   local: "Runs on your own PC: free, private and offline. Needs Ollama or LM Studio.",
@@ -22,7 +21,7 @@ const CONTEXT_HINTS = {
 };
 const AI_NAMES = { openrouter: "OpenRouter", gemini: "Google Gemini", local: "Local AI", builtin: "Built-in translator" };
 
-let settings = {}, resolvedLlm = "none", status = null, first = true, tab = null, host = "", tabState = null, pollTimer = null;
+let settings = {}, status = null, first = true, tab = null, host = "", tabState = null, pollTimer = null;
 const msg = (m) => chrome.runtime.sendMessage(m);
 
 // ---------------------------------------------------------------- readiness
@@ -44,14 +43,13 @@ function check(id, mark, title, text, fixes) {
 }
 
 const openSettings = (focus) => { $("settings").open = true; if (focus) $(focus).focus(); $("settings").scrollIntoView({ behavior: "smooth" }); };
-const useAuto = { label: "Use automatic", fn: () => setLlmMode("auto") };
+const useBuiltin = { label: "Use the built-in translator", fn: () => setLlmMode("builtin") };
 const signInFix = { label: "Sign in with OpenRouter", primary: true, fn: () => signIn() };
 
 async function refresh() {
   status = await msg({ type: "status" });
   const st = status, b = st.backend, info = (b && b.info) || {};
   settings = st.settings;
-  resolvedLlm = st.llm;
   const blockers = [];
   let busy = false, warn = false;
 
@@ -81,16 +79,11 @@ async function refresh() {
   // 2. the AI
   if (st.missing === "openrouter") {
     blockers.push("ai");
-    check("c-ai", "bad", "OpenRouter isn't connected", "You chose OpenRouter in Settings but haven't signed in.", [signInFix, useAuto]);
+    check("c-ai", "bad", "OpenRouter isn't connected", "You chose OpenRouter in Settings but haven't signed in.", [signInFix, useBuiltin]);
   } else if (st.missing === "gemini") {
     blockers.push("ai");
     check("c-ai", "bad", "Gemini API key is missing", "You chose Gemini in Settings but haven't added a key.",
-      [{ label: "Add a key", primary: true, fn: () => openSettings("geminiKey") }, useAuto]);
-  } else if (st.llm === "none") { // the app's own offline translator
-    warn = true;
-    check("c-ai", "warn", "No AI connected yet",
-      "MangaTVL will use its built-in offline translator (free, basic). Sign in with OpenRouter for better translations that follow the story.",
-      [signInFix, { label: "Other options", fn: () => openSettings("llmMode") }]);
+      [{ label: "Add a key", primary: true, fn: () => openSettings("geminiKey") }, useBuiltin]);
   } else {
     const model = st.llm === "openrouter" ? settings.modelOpenrouter : st.llm === "gemini" ? settings.modelGemini
       : st.llm === "local" ? settings.modelLocal : "";
@@ -219,7 +212,7 @@ async function save(v) {
 
 function showProviders() {
   const mode = $("llmMode").value;
-  for (const p of ["openrouter", "gemini", "local"]) $(`p-${p}`).hidden = !(mode === "auto" || mode === p);
+  for (const p of ["openrouter", "gemini", "local"]) $(`p-${p}`).hidden = mode !== p;
   const orOn = !!settings.openrouterKey, gmOn = !!settings.geminiKey;
   $("or-state").textContent = orOn ? "Connected" : "Not connected";
   $("signin").textContent = orOn ? "Reconnect" : "Sign in with OpenRouter";
@@ -239,10 +232,9 @@ async function setLlmMode(v) {
 }
 $("llmMode").onchange = () => setLlmMode($("llmMode").value);
 
-// "auto" shows the model of the provider auto picked right now
 function modelProvider() {
   const mode = $("llmMode").value;
-  return mode === "auto" ? resolvedLlm : mode;
+  return mode;
 }
 
 let shownModel = null;

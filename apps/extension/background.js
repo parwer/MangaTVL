@@ -8,7 +8,7 @@
 
 const COMPANION_URLS = ["http://127.0.0.1:8765", "http://localhost:8765"];
 const DEFAULTS = {
-  llmMode: "auto",          // auto | openrouter | gemini | local | builtin
+  llmMode: "builtin",       // builtin | openrouter | gemini | local
   openrouterKey: "",
   geminiKey: "",
   modelOpenrouter: "",      // provider/model, blank = the app's default
@@ -35,6 +35,10 @@ async function getSettings() {
   }
   delete s.model;
   if (s.fromLang === "auto") s.fromLang = "english"; // up to 0.3.2 "auto" meant English
+  if (s.llmMode === "auto") { // "Automatic" is gone: keep the AI it was using
+    s.llmMode = s.openrouterKey ? "openrouter" : s.geminiKey ? "gemini" : s.localUrl ? "local" : "builtin";
+    await chrome.storage.local.set({ llmMode: s.llmMode });
+  }
   return s;
 }
 
@@ -105,25 +109,18 @@ async function findBackend(settings) {
 }
 
 // ---------------------------------------------------------------- LLM credentials
-// Pick what to send. "auto" prefers whatever the user already has, in the order
-// that gives the best context-aware quality, and falls back to the companion's
-// local model (no account at all).
-function llmConfig(s, backendInfo) {
+// What to send for the AI the user picked. One that isn't set up says so instead of quietly using another.
+function llmConfig(s) {
   const mode = s.llmMode;
-  if ((mode === "openrouter" || mode === "auto") && s.openrouterKey)
-    return { provider: "openrouter", api_key: s.openrouterKey, model: s.modelOpenrouter || null };
-  if ((mode === "gemini" || mode === "auto") && s.geminiKey)
-    return { provider: "gemini", api_key: s.geminiKey, model: s.modelGemini || null };
-  // picked explicitly but not set up: say so instead of quietly using another AI
-  if (mode === "openrouter" && !s.openrouterKey) return { provider: "none", missing: "openrouter" };
-  if (mode === "gemini" && !s.geminiKey) return { provider: "none", missing: "gemini" };
-  if (mode === "builtin") return { provider: "builtin" }; // the app's offline model (an app without it: Chrome's Translator in content.js)
-  const local = { provider: "local", model: s.modelLocal || null, base_url: s.localUrl || null };
-  if (mode === "local" || (mode === "auto" && s.localUrl)) return local; // the user's own server
+  if (mode === "openrouter")
+    return s.openrouterKey ? { provider: "openrouter", api_key: s.openrouterKey, model: s.modelOpenrouter || null }
+      : { provider: "none", missing: "openrouter" };
+  if (mode === "gemini")
+    return s.geminiKey ? { provider: "gemini", api_key: s.geminiKey, model: s.modelGemini || null }
+      : { provider: "none", missing: "gemini" };
+  if (mode === "local") return { provider: "local", model: s.modelLocal || null, base_url: s.localUrl || null };
   // relay off: free daily quota, no account (apps/relay)
-  // if (mode === "auto" && backendInfo && backendInfo.relay) return { provider: "relay" };
-  if (backendInfo && backendInfo.local_llm) return local;
-  return { provider: "none" };
+  return { provider: "builtin" }; // the app's offline model (an app without it: Chrome's Translator in content.js)
 }
 
 async function blobToDataURL(blob) {
@@ -224,10 +221,10 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         try { await chrome.action.openPopup(); } catch (_) { await chrome.runtime.openOptionsPage(); }
         return reply({ ok: true });
       }
-      if (msg.type === "signout") { // forget a stored key; an AI picked by name goes back to automatic
+      if (msg.type === "signout") { // forget a stored key; if it was the AI in use, go back to the built-in translator
         const s = await getSettings();
         const key = msg.provider === "gemini" ? "geminiKey" : "openrouterKey";
-        await chrome.storage.local.set({ [key]: "", ...(s.llmMode === msg.provider ? { llmMode: "auto" } : {}) });
+        await chrome.storage.local.set({ [key]: "", ...(s.llmMode === msg.provider ? { llmMode: "builtin" } : {}) });
         return reply({ ok: true });
       }
       if (msg.type === "settings") return reply(await getSettings().then((s) => ({ contextMode: s.contextMode, llmMode: s.llmMode, fromLang: s.fromLang, toLang: s.toLang })));
@@ -244,9 +241,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   return true; // async reply
 });
 
-chrome.runtime.onInstalled.addListener(({ reason }) => {
-  // new installs start on Chrome's built-in translator (no account); updates keep the user's choice
-  if (reason === "install") chrome.storage.local.set({ llmMode: "builtin" });
+chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({ id: "mtvl-one", title: "Translate this image (MangaTVL)", contexts: ["image"] });
   chrome.contextMenus.create({ id: "mtvl-all", title: "Translate all manga pages on this page", contexts: ["page"] });
 });
