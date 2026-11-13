@@ -182,6 +182,8 @@ def translator_for(provider: str, api_key: str | None, model: str | None, base_u
         return AsyncOpenRouterTranslator(client=client, model=model or default)
     tr = pipe()._get_translator(provider, pipe()._resolve_key(provider, api_key))
     tr.model = tr.model or MODEL
+    if provider == "gemini":  # Google's own API takes "gemini-...", not OpenRouter's "google/gemini-..."
+        tr.model = tr.model.rsplit("/", 1)[-1]
     return tr
 
 

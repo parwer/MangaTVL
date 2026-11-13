@@ -94,6 +94,21 @@ def test_builtin_without_bing_or_offline_model_hands_text_to_the_extension(monke
     assert c.post("/v1/render", json={"job": r["job"], "translations": []}, headers=EXT).status_code == 404
 
 
+def test_gemini_default_model_has_no_openrouter_prefix(monkeypatch):
+    class Tr:
+        model = None
+
+    class Pipe:
+        def _get_translator(self, provider, key):
+            return Tr()
+
+        def _resolve_key(self, provider, key):
+            return key
+
+    monkeypatch.setattr(srv, "PIPE", Pipe())
+    assert srv.MODEL.startswith("google/") and srv.translator_for("gemini", "k", None).model == srv.MODEL.split("/")[-1]
+
+
 def test_oauth_code_handoff(monkeypatch):
     c, _ = client(monkeypatch, [])
     assert c.get("/oauth/callback/xyz?code=abc").status_code == 200
