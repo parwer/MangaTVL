@@ -1,61 +1,106 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><style>
- body { width: 300px; font: 13px/1.45 system-ui, sans-serif; margin: 12px; color: #222; }
- h3 { margin: 0 0 8px; font-size: 15px; }
- .row { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
- .dot { width: 9px; height: 9px; border-radius: 50%; background: #bbb; }
- .ok { background: #2a2; } .bad { background: #c22; }
- button { width: 100%; padding: 9px; margin: 4px 0; border: 0; border-radius: 8px; cursor: pointer; font-weight: 600; }
- .primary { background: #e2334a; color: #fff; } .ghost { background: #eee; }
- .on { background: #2a2; color: #fff; }
- select, input { width: 100%; padding: 5px; box-sizing: border-box; margin: 2px 0; }
- details { margin-top: 8px; } small { color: #666; }
-</style></head><body>
- <h3>MangaTVL</h3>
- <button id="site" class="ghost">…</button>
- <div class="row"><span id="d-backend" class="dot"></span><span id="t-backend">checking…</span></div>
- <div class="row"><span id="d-llm" class="dot"></span><span id="t-llm"></span></div>
- <a id="get-app" href="https://github.com/parwer/MangaTVL/releases/latest" target="_blank" hidden>⬇ ดาวน์โหลดแอป MangaTVL Companion (ติดตั้งครั้งเดียว)</a>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MangaTVL</title>
+<link rel="stylesheet" href="popup.css">
+</head><body>
+<main>
+ <header>
+  <img src="icons/icon48.png" alt="" width="28" height="28">
+  <h1>MangaTVL</h1>
+  <span id="version" class="chip"></span>
+ </header>
 
- <button id="signin" class="primary">Sign in with OpenRouter (1 คลิก)</button>
- <small>ไม่ต้อง copy API key — ล็อกอินแล้วระบบจะได้ key ให้อัตโนมัติ<br>ไม่มีบัญชี? ใช้ "Local AI" ในแอป Companion ได้ฟรี</small>
+ <!-- is everything in place, and what to do if not -->
+ <section id="status" class="card status" data-tone="busy" aria-live="polite">
+  <div class="status-head"><span class="status-icon" aria-hidden="true"></span><div>
+   <h2 id="status-title">Checking…</h2><p id="status-text"></p></div></div>
+  <ul class="checks">
+   <li id="c-app"><span class="mark" aria-hidden="true"></span><div class="what"><b></b><small></small><div class="fix"></div></div></li>
+   <li id="c-ai"><span class="mark" aria-hidden="true"></span><div class="what"><b></b><small></small><div class="fix"></div></div></li>
+   <li id="c-site"><span class="mark" aria-hidden="true"></span><div class="what"><b></b><small></small></div>
+    <label class="switch"><input id="site" type="checkbox"><span></span></label></li>
+  </ul>
+ </section>
 
- <label>แปลจาก (ภาษาในรูป)</label>
- <select id="fromLang"><option value="english">English</option><option value="japanese">Japanese</option><option value="korean">Korean</option><option value="chinese">Chinese (Simplified)</option><option value="chinese_traditional">Chinese (Traditional)</option><option value="thai">Thai</option><option value="vietnamese">Vietnamese</option><option value="indonesian">Indonesian</option><option value="french">French</option><option value="german">German</option><option value="spanish">Spanish</option><option value="italian">Italian</option><option value="portuguese">Portuguese</option><option value="russian">Russian</option></select>
-
- <label>แปลเป็น</label>
- <select id="toLang"><option value="thai">Thai</option><option value="english">English</option><option value="japanese">Japanese</option><option value="korean">Korean</option><option value="chinese">Chinese (Simplified)</option><option value="chinese_traditional">Chinese (Traditional)</option><option value="vietnamese">Vietnamese</option><option value="indonesian">Indonesian</option><option value="french">French</option><option value="german">German</option><option value="spanish">Spanish</option><option value="italian">Italian</option><option value="portuguese">Portuguese</option><option value="russian">Russian</option></select>
-
- <label>วิธีแปล</label>
- <select id="contextMode">
-  <option value="chapter">อิงเนื้อเรื่อง (ส่ง context หน้าต่อหน้า ชื่อและสำนวนสม่ำเสมอ)</option>
-  <option value="page">แยกหน้า (ไม่ใช้ context แปลหลายหน้าพร้อมกัน เร็วกว่า)</option>
- </select>
-
- <details><summary>ขั้นสูง</summary>
-  <label>AI ที่ใช้</label>
-  <select id="llmMode">
-   <option value="auto">อัตโนมัติ (แนะนำ)</option>
-   <option value="openrouter">OpenRouter</option>
-   <option value="gemini">Gemini key</option>
-   <option value="local">Local AI (ในแอป, ไม่ต้องมีบัญชี)</option>
-   <option value="builtin">Chrome built-in (ออฟไลน์, ไม่เข้าใจบริบทภาพ)</option>
-  </select>
-  <label>Gemini API key (ถ้ามี)</label><input id="geminiKey" type="password" placeholder="AIza…">
-  <label>Local AI URL (Ollama / LM Studio / server แบบ OpenAI-compatible)</label>
-  <input id="localUrl" placeholder="เว้นว่าง = Ollama http://127.0.0.1:11434/v1 · LM Studio http://127.0.0.1:1234/v1">
-  <button id="checkLocal" class="ghost">ตรวจ Local AI</button><small id="localInfo"></small>
-  <div id="modelBox">
-   <label id="modelLabel">Model</label>
-   <input id="modelText">
-   <select id="modelLocal"></select>
-   <small id="modelHint"></small>
+ <section class="card">
+  <h3>Languages</h3>
+  <div class="langs">
+   <label class="field"><span>From</span>
+    <select id="fromLang" aria-label="Language of the pages"><option value="english">English</option><option value="japanese">Japanese</option><option value="korean">Korean</option><option value="chinese">Chinese (Simplified)</option><option value="chinese_traditional">Chinese (Traditional)</option><option value="thai">Thai</option><option value="vietnamese">Vietnamese</option><option value="indonesian">Indonesian</option><option value="french">French</option><option value="german">German</option><option value="spanish">Spanish</option><option value="italian">Italian</option><option value="portuguese">Portuguese</option><option value="russian">Russian</option></select></label>
+   <button id="swap" class="icon-btn" title="Swap languages" aria-label="Swap languages">⇄</button>
+   <label class="field"><span>To</span>
+    <select id="toLang" aria-label="Translate into"><option value="thai">Thai</option><option value="english">English</option><option value="japanese">Japanese</option><option value="korean">Korean</option><option value="chinese">Chinese (Simplified)</option><option value="chinese_traditional">Chinese (Traditional)</option><option value="vietnamese">Vietnamese</option><option value="indonesian">Indonesian</option><option value="french">French</option><option value="german">German</option><option value="spanish">Spanish</option><option value="italian">Italian</option><option value="portuguese">Portuguese</option><option value="russian">Russian</option></select></label>
   </div>
-  <!-- relay off -->
-  <label hidden>Relay server (ถ้าองค์กรมีให้)</label><input id="relayUrl" placeholder="https://…" hidden>
-  <label>คุณภาพ</label><select id="quality"><option value="best">ดีที่สุด (LaMa + typesetting)</option><option value="fast">เร็ว (ไม่ใช้ LaMa และตัวกรอง SFX ญี่ปุ่น)</option></select>
-  <label>ข้อมูลที่ส่งให้ AI</label><select id="llmInput"><option value="image">ภาพหน้า + ข้อความ (แม่นกว่า)</option><option value="text">ข้อความอย่างเดียว (โมเดลที่ไม่รับภาพ, ประหยัด token)</option></select>
-  <button id="save" class="ghost">บันทึก</button>
+
+  <h3>Translation style</h3>
+  <div class="seg" role="radiogroup" data-field="contextMode">
+   <button role="radio" data-value="chapter">Story mode</button>
+   <button role="radio" data-value="page">Fast mode</button>
+  </div>
+  <p class="hint" id="contextHint"></p>
+ </section>
+
+ <button id="translate" class="primary big">Translate this page</button>
+ <p class="hint center" id="translateHint">Tip: right-click any image and choose <b>Translate this image</b>.</p>
+
+ <details id="settings" class="card">
+  <summary><span>Settings</span><small>AI service, quality</small></summary>
+
+  <h3>AI service</h3>
+  <label class="field"><span>Which AI translates</span>
+   <select id="llmMode">
+    <option value="auto">Automatic (recommended)</option>
+    <option value="openrouter">OpenRouter</option>
+    <option value="gemini">Google Gemini</option>
+    <option value="local">Local AI on this PC</option>
+    <option value="builtin">Built-in translator (free, offline)</option>
+   </select></label>
+  <p class="hint" id="llmHint"></p>
+
+  <div class="provider" id="p-openrouter">
+   <div class="provider-head"><b>OpenRouter</b><span id="or-state" class="chip"></span></div>
+   <p class="hint">Sign in once and MangaTVL gets its own key. Nothing to copy or paste.</p>
+   <div class="btns"><button id="signin" class="primary">Sign in with OpenRouter</button>
+    <button id="or-out" class="ghost">Disconnect</button></div>
+   <p class="hint" id="or-msg" aria-live="polite"></p>
+  </div>
+
+  <div class="provider" id="p-gemini">
+   <div class="provider-head"><b>Google Gemini</b><span id="gm-state" class="chip"></span></div>
+   <label class="field"><span>API key</span><input id="geminiKey" type="password" autocomplete="off" placeholder="Paste your key (starts with AIza)"></label>
+   <div class="btns"><a class="link" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key</a>
+    <button id="gm-out" class="ghost small">Remove key</button></div>
+  </div>
+
+  <div class="provider" id="p-local">
+   <div class="provider-head"><b>Local AI</b></div>
+   <p class="hint">Free and private: Ollama, LM Studio or any OpenAI-compatible server on your PC.</p>
+   <label class="field"><span>Server address</span><input id="localUrl" placeholder="Blank = Ollama (http://127.0.0.1:11434/v1)"></label>
+   <small class="hint">LM Studio: http://127.0.0.1:1234/v1</small>
+   <div class="btns"><button id="checkLocal" class="ghost">Test connection</button></div>
+   <p class="hint" id="localInfo" aria-live="polite"></p>
+  </div>
+
+  <div class="provider" id="modelBox">
+   <label class="field"><span id="modelLabel">Model</span>
+    <input id="modelText"><select id="modelLocal"></select></label>
+   <p class="hint" id="modelHint"></p>
+  </div>
+
+  <h3>Quality</h3>
+  <label class="field"><span>Image cleanup</span>
+   <select id="quality"><option value="best">Best (cleanest result)</option><option value="fast">Fast (quicker, simpler cleanup)</option></select></label>
+  <label class="field"><span>What the AI sees</span>
+   <select id="llmInput"><option value="image">Page and text (more accurate)</option><option value="text">Text only (for AI without image support, uses less)</option></select></label>
+  <!-- relay off: a "Relay server" field went here -->
+  <p class="hint center" id="saved" aria-live="polite">Changes save automatically.</p>
  </details>
+
+ <footer>
+  <a href="https://github.com/parwer/MangaTVL#use" target="_blank" rel="noopener">Help</a>
+  <span>·</span>
+  <a href="https://github.com/parwer/MangaTVL/releases/latest" target="_blank" rel="noopener">Get the Companion app</a>
+ </footer>
+</main>
 <script src="popup.js"></script>
 </body></html>

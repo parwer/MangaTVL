@@ -4,6 +4,7 @@ import heapq
 import io
 import os
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -20,8 +21,9 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from pipeline import QualityPipeline, glossary_words  # noqa: E402
 from manga_translator.schemas.interface import TranslationResult  # noqa: E402
+from manga_translator.translators import offline_mt  # noqa: E402
 
-VERSION = "0.3.3"
+VERSION = "0.3.4"
 MODEL = os.getenv("MODEL") or "google/gemini-3-flash-preview"
 # MTVL_DEVICE, not DEVICE: the repo .env sets DEVICE=cpu for main.py, which put the companion's
 # glyph mask and LaMa on the CPU (minutes per page, the whole PC froze)
@@ -31,6 +33,8 @@ app.add_middleware(CORSMiddleware, allow_origin_regex=r"^chrome-extension://[a-p
                    allow_methods=["*"], allow_headers=["*"], allow_private_network=True)  # Chrome local-network preflight
 
 PIPE: QualityPipeline | None = None
+PIPE_LOCK = threading.Lock()
+LOAD = {"loading": False, "error": None}  # the tray app loads the models while the server already answers health
 JOBS: dict[str, dict] = {}  # job id -> page state, translation results and the render task
 OAUTH: dict[str, str] = {}
 RENDER, ANALYZE = 0, 1  # GPU priorities: lettering a translated page goes before analysing the next
@@ -91,20 +95,29 @@ async def only_extensions(request: Request, call_next):
 def pipe() -> QualityPipeline:
     """The pipeline, loaded on first use: PyTorch when installed, else all-ONNX (DirectML)."""
     global PIPE
-    if PIPE is None:
-        try:
-            import torch
-            device = DEVICE or ("cuda" if torch.cuda.is_available() else "cpu")
-            PIPE = QualityPipeline(provider="openrouter", model=MODEL, device=device)
-        except ImportError:  # packaged app: onnxruntime only
-            from manga_translator.detection import build_detector
-            models = REPO / "manga_translator" / "assets" / "models"
-            device = DEVICE or "dml"
-            # detectors on CPU (0.22 s); on DirectML each new page size recompiles (0.55 s)
-            det = build_detector(models / "best_diplom.onnx", models / "bubble_freetext_yolo26s.onnx", device="cpu")
-            PIPE = QualityPipeline(provider="openrouter", model=MODEL, device=device, det_model=det,
-                                   lama_onnx=models / "lama_ft2_512.onnx")
+    if PIPE is not None:
+        return PIPE
+    with PIPE_LOCK:
+        if PIPE is None:
+            _load_pipe()
     return PIPE
+
+
+def _load_pipe():
+    """Build the pipeline for this machine (call under PIPE_LOCK)."""
+    global PIPE
+    try:
+        import torch
+        device = DEVICE or ("cuda" if torch.cuda.is_available() else "cpu")
+        PIPE = QualityPipeline(provider="openrouter", model=MODEL, device=device)
+    except ImportError:  # packaged app: onnxruntime only
+        from manga_translator.detection import build_detector
+        models = REPO / "manga_translator" / "assets" / "models"
+        device = DEVICE or "dml"
+        # detectors on CPU (0.22 s); on DirectML each new page size recompiles (0.55 s)
+        det = build_detector(models / "best_diplom.onnx", models / "bubble_freetext_yolo26s.onnx", device="cpu")
+        PIPE = QualityPipeline(provider="openrouter", model=MODEL, device=device, det_model=det,
+                               lama_onnx=models / "lama_ft2_512.onnx")
 
 
 def ollama_ok() -> bool:
@@ -231,6 +244,8 @@ def health():
     # no GPU: each page takes about 30 s on the CPU and always runs at "fast" quality
     cpu_only = getattr(PIPE, "cpu_only", False) if PIPE is not None else (DEVICE == "cpu" or not gpu)
     return {"version": VERSION, "gpu": gpu, "cpu_only": cpu_only, "local_llm": ollama_ok(), "relay": False, "jobs": True,
+            "offline_mt": offline_mt.available(),
+            "ready": not LOAD["loading"] and not LOAD["error"], "loading": LOAD["loading"], "load_error": LOAD["error"],
             "providers": ["openrouter", "gemini", "local", "builtin"]}
 
 
@@ -246,10 +261,11 @@ def lang_label(name: str | None) -> str | None:
 
 async def _analyze(image: str, from_lang: str, to_lang: str, quality: str = "best") -> dict:
     src = None if from_lang == "auto" else from_lang
-    fast = quality == "fast" or getattr(pipe(), "cpu_only", False)  # CPU: LaMa adds up to ~20 s a page
-    page = await GPU.run(ANALYZE, pipe().analyze_gpu, decode(image), src, fast)
+    p = await asyncio.to_thread(pipe)  # off the event loop: the models may still be loading
+    fast = quality == "fast" or getattr(p, "cpu_only", False)  # CPU: LaMa adds up to ~20 s a page
+    page = await GPU.run(ANALYZE, p.analyze_gpu, decode(image), src, fast)
     # second OCR reading is CPU only: off the GPU queue so the next page's detection runs meanwhile
-    page = await asyncio.to_thread(pipe().analyze_cpu, page, src)
+    page = await asyncio.to_thread(p.analyze_cpu, page, src)
     _expire()
     jid = uuid.uuid4().hex
     JOBS[jid] = {"t": time.time(), "page": page, "src": src, "to_lang": to_lang, "task": None}
@@ -282,8 +298,16 @@ async def _translate_job(job: dict, llm: LLM, context: dict | None, send_image: 
     # relay off: zero-account tier
     # if prov == "relay" or (prov == "none" and relay_ok()):
     #     prov, key = "relay", relay_token()
-    if prov in ("none", "builtin"):  # the extension translates with Chrome's on-device Translator
-        return {"needs_client_translation": True, "context": context}
+    if prov in ("none", "builtin"):  # free and offline: the app's own model, the same in every browser
+        if not offline_mt.available():  # an app built without it: Chrome's on-device Translator in the extension
+            return {"needs_client_translation": True, "context": context}
+        try:
+            texts = await asyncio.to_thread(offline_mt.translate, [o.text for o in page.ocr], job["src"], job["to_lang"])
+        except Exception as e:
+            raise HTTPException(502, f"offline translator: {e}") from e
+        results = [TranslationResult(ocr_result=o, translated_text=t) for o, t in zip(page.ocr, texts)]
+        _start_render(job, results)
+        return {"context": context, "bubbles": [{"n": n, "speaker": "", "text": t} for n, t in enumerate(texts)]}
     chapter = {"context": context}
     try:
         tr = translator_for(prov, key, llm.model, llm.base_url)
@@ -293,7 +317,7 @@ async def _translate_job(job: dict, llm: LLM, context: dict | None, send_image: 
     except Exception as e:  # provider errors (bad key, quota) go to the badge
         # relay off: its daily quota
         # if prov == "relay" and "429" in str(e):
-        #     raise HTTPException(429, "โควตาฟรีวันนี้หมดแล้ว — กด Sign in with OpenRouter เพื่อแปลต่อ") from e
+        #     raise HTTPException(429, "Today's free quota is used up. Sign in with OpenRouter to keep translating.") from e
         raise HTTPException(502, f"{prov}: {e}") from e
     _start_render(job, results, glossary_words(chapter["context"]))
     return {"context": chapter["context"],
@@ -355,7 +379,11 @@ async def render(req: RenderReq):
 def oauth_callback(code: str, state: str = "", path_state: str = ""):
     # OpenRouter does not promise to echo `state`; the extension also puts it in the path
     OAUTH[path_state or state] = code
-    return "<h3>เชื่อมต่อ OpenRouter สำเร็จ — ปิดแท็บนี้ได้เลย</h3><script>setTimeout(()=>window.close(),1500)</script>"
+    return ("<!doctype html><meta charset=utf-8><title>MangaTVL</title>"
+            "<body style='font:16px system-ui,sans-serif;display:grid;place-items:center;height:90vh;margin:0'>"
+            "<div style='text-align:center'><div style='font-size:48px'>&#10003;</div>"
+            "<h2 style='margin:8px 0'>OpenRouter is connected</h2><p style='color:#666'>You can close this tab.</p></div>"
+            "<script>setTimeout(()=>window.close(),1500)</script>")
 
 
 @app.get("/v1/local-models")

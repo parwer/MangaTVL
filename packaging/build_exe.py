@@ -28,6 +28,7 @@ def main():
         "--add-data", f"{APP / 'manga_translator' / 'assets'};manga_translator/assets",
         "--collect-all", "rapidocr", "--collect-all", "pythainlp", "--collect-all", "uharfbuzz",
         "--collect-all", "freetype", "--collect-binaries", "onnxruntime",
+        "--collect-all", "ctranslate2", "--collect-all", "sentencepiece",  # offline translator (M2M100)
         "--collect-submodules", "manga_translator", "--collect-submodules", "apps",
         "--exclude-module", "torch", "--exclude-module", "ultralytics", "--exclude-module", "easyocr",
         "--exclude-module", "matplotlib", "--exclude-module", "tkinter",

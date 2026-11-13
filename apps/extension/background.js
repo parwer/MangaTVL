@@ -117,7 +117,7 @@ function llmConfig(s, backendInfo) {
   // picked explicitly but not set up: say so instead of quietly using another AI
   if (mode === "openrouter" && !s.openrouterKey) return { provider: "none", missing: "openrouter" };
   if (mode === "gemini" && !s.geminiKey) return { provider: "none", missing: "gemini" };
-  if (mode === "builtin") return { provider: "builtin" }; // Chrome on-device Translator, done in content.js
+  if (mode === "builtin") return { provider: "builtin" }; // the app's offline model (an app without it: Chrome's Translator in content.js)
   const local = { provider: "local", model: s.modelLocal || null, base_url: s.localUrl || null };
   if (mode === "local" || (mode === "auto" && s.localUrl)) return local; // the user's own server
   // relay off: free daily quota, no account (apps/relay)
@@ -162,8 +162,8 @@ async function analyzePage({ src, dataUrl, pageUrl }) {
     quality: s.quality });
 }
 
-const MISSING_ERRORS = { openrouter: "เลือก OpenRouter ไว้แต่ยังไม่ได้ Sign in — เปิด popup แล้วกด Sign in",
-                         gemini: "เลือก Gemini ไว้แต่ยังไม่ได้ใส่ API key — ใส่ key ใน popup" };
+// codes: content.js and the popup turn them into a message and a fix
+const MISSING_ERRORS = { openrouter: "missing-openrouter", gemini: "missing-gemini" };
 
 async function translateJob({ job, context }) {
   const s = await getSettings();
@@ -220,6 +220,16 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         const q = msg.url ? `?url=${encodeURIComponent(msg.url)}` : "";
         return reply(await call(b, `/v1/local-models${q}`));
       }
+      if (msg.type === "open-settings") { // the page's "Open MangaTVL" buttons: the popup, else the same page in a tab
+        try { await chrome.action.openPopup(); } catch (_) { await chrome.runtime.openOptionsPage(); }
+        return reply({ ok: true });
+      }
+      if (msg.type === "signout") { // forget a stored key; an AI picked by name goes back to automatic
+        const s = await getSettings();
+        const key = msg.provider === "gemini" ? "geminiKey" : "openrouterKey";
+        await chrome.storage.local.set({ [key]: "", ...(s.llmMode === msg.provider ? { llmMode: "auto" } : {}) });
+        return reply({ ok: true });
+      }
       if (msg.type === "settings") return reply(await getSettings().then((s) => ({ contextMode: s.contextMode, llmMode: s.llmMode, fromLang: s.fromLang, toLang: s.toLang })));
       if (msg.type === "render") { // second half of the "builtin" flow
         const b = await findBackend(await getSettings());
@@ -234,7 +244,9 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   return true; // async reply
 });
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(({ reason }) => {
+  // new installs start on Chrome's built-in translator (no account); updates keep the user's choice
+  if (reason === "install") chrome.storage.local.set({ llmMode: "builtin" });
   chrome.contextMenus.create({ id: "mtvl-one", title: "Translate this image (MangaTVL)", contexts: ["image"] });
   chrome.contextMenus.create({ id: "mtvl-all", title: "Translate all manga pages on this page", contexts: ["page"] });
 });

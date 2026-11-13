@@ -7,7 +7,7 @@ REPO = Path(__file__).resolve().parents[1]
 OUT = REPO / "packaging" / "build" / "app"
 CODE = ["pipeline.py", "manga_translator", "apps/__init__.py", "apps/companion", "apps/extension"]
 MODELS = ["comictextdetector_subpixel.onnx", "lama_ft2_512.onnx", "best_diplom.onnx", "bubble_freetext_yolo26s.onnx",
-          "baberu"]
+          "baberu", "m2m100_418m_ct2"]
 SKIP = {"__pycache__", "models"}  # assets/models is copied selectively (ONNX only)
 
 

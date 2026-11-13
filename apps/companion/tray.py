@@ -4,6 +4,7 @@ import socket
 import subprocess
 import sys
 import threading
+import webbrowser
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -13,18 +14,24 @@ LOG = APP_DIR / "companion.log"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 RUN_NAME = "MangaTVL Companion"  # the installer's "start with Windows" task writes the same value
 PORT = int(os.getenv("MTVL_PORT", "8765"))
+RELEASES_URL = "https://github.com/parwer/MangaTVL/releases/latest"
+COLORS = {"brand": (226, 51, 74, 255), "ready": (46, 160, 67, 255), "loading": (214, 138, 0, 255),
+          "error": (200, 40, 40, 255)}
 
 
-def icon_image(size: int = 64, ready: bool = True) -> Image.Image:
-    """Tray / exe icon: a speech balloon, green when the models are loaded."""
-    im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+def icon_image(size: int = 64, state: str = "brand") -> Image.Image:
+    """App icon: a speech balloon with two lines of text, colored by state (brand, ready, loading, error)."""
+    big = size * 4  # drawn large, then scaled down for smooth edges
+    im = Image.new("RGBA", (big, big), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
-    s = size / 64
-    fill = (46, 160, 67, 255) if ready else (200, 120, 0, 255)
-    d.ellipse([4 * s, 6 * s, 60 * s, 46 * s], fill=fill)
-    d.polygon([(16 * s, 40 * s), (12 * s, 60 * s), (30 * s, 44 * s)], fill=fill)
-    d.text((20 * s, 12 * s), "TH", fill="white", font_size=int(20 * s))
-    return im
+    s = big / 64
+    fill = COLORS.get(state, COLORS["brand"])
+    d.rounded_rectangle([4 * s, 6 * s, 60 * s, 46 * s], radius=14 * s, fill=fill)
+    d.polygon([(14 * s, 40 * s), (10 * s, 60 * s), (30 * s, 45 * s)], fill=fill)
+    white = (255, 255, 255, 255)
+    d.rounded_rectangle([14 * s, 17 * s, 50 * s, 23 * s], radius=3 * s, fill=white)
+    d.rounded_rectangle([14 * s, 29 * s, 40 * s, 35 * s], radius=3 * s, fill=white)
+    return im.resize((size, size), Image.LANCZOS)
 
 
 def port_in_use(port: int) -> bool:
@@ -59,32 +66,40 @@ def set_autostart(on: bool):
 
 
 def main():
-    """Windowless companion: the server runs on a thread, a tray icon shows its state."""
+    """Windowless companion: the server answers at once, the models load beside it, a tray icon shows the state."""
     import pystray
 
     APP_DIR.mkdir(parents=True, exist_ok=True)
     log = open(LOG, "a", encoding="utf-8", buffering=1)
     sys.stdout = sys.stderr = log  # no console in the windowed exe (None would break uvicorn's logging)
     if port_in_use(PORT):
-        message("MangaTVL Companion เปิดอยู่แล้ว (ดูไอคอนที่มุมขวาล่างของจอ)")
+        message("MangaTVL Companion is already running.\n\nLook for its icon in the system tray "
+                "(bottom-right corner of the screen, you may need to click ^ to see it).")
         return
 
     import uvicorn
     from apps.companion import server
 
-    state = {"text": "กำลังโหลดโมเดล…"}
+    state = {"text": "Starting: loading models…"}
     srv = uvicorn.Server(uvicorn.Config(server.app, host="127.0.0.1", port=PORT, log_level="info"))
+    server.LOAD["loading"] = True  # health says "starting" until the models are in
 
-    def run():
+    def load():
         try:
             server.pipe()  # load the models before the first page arrives
-            state["text"] = "พร้อมใช้งาน"
-            icon.icon, icon.title = icon_image(ready=True), "MangaTVL Companion: พร้อมใช้งาน"
+            state["text"] = "Ready to translate"
+            icon.icon, icon.title = icon_image(state="ready"), "MangaTVL Companion: ready"
         except Exception as e:  # still serve: health tells the extension, the log has the details
-            state["text"] = f"โหลดโมเดลไม่สำเร็จ: {e}"[:120]
+            server.LOAD["error"] = str(e)[:200]
+            state["text"] = f"Couldn't load the models: {e}"[:120]
+            icon.icon, icon.title = icon_image(state="error"), "MangaTVL Companion: couldn't load the models"
             print(f"model load failed: {e!r}", flush=True)
-        icon.update_menu()
-        srv.run()
+        finally:
+            server.LOAD["loading"] = False
+        try:
+            icon.update_menu()
+        except Exception:  # the tray may not be up yet
+            pass
 
     def quit_app(icon_, _):
         srv.should_exit = True
@@ -93,13 +108,16 @@ def main():
     menu = pystray.Menu(
         pystray.MenuItem(lambda _: state["text"], None, enabled=False),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem("เปิดพร้อม Windows", lambda _i, _m: set_autostart(not autostart()),
+        pystray.MenuItem("Start with Windows", lambda _i, _m: set_autostart(not autostart()),
                          checked=lambda _: autostart(), visible=getattr(sys, "frozen", False)),
-        pystray.MenuItem("เปิดไฟล์ log", lambda _i, _m: subprocess.Popen(["notepad", str(LOG)])),
-        pystray.MenuItem("ปิดโปรแกรม", quit_app),
+        pystray.MenuItem("Get the latest version", lambda _i, _m: webbrowser.open(RELEASES_URL)),
+        pystray.MenuItem("Open log file", lambda _i, _m: subprocess.Popen(["notepad", str(LOG)])),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Quit MangaTVL Companion", quit_app),
     )
-    icon = pystray.Icon("MangaTVL", icon_image(ready=False), "MangaTVL Companion: กำลังโหลดโมเดล…", menu)
-    threading.Thread(target=run, daemon=True).start()
+    icon = pystray.Icon("MangaTVL", icon_image(state="loading"), "MangaTVL Companion: starting…", menu)
+    threading.Thread(target=srv.run, daemon=True).start()
+    threading.Thread(target=load, daemon=True).start()
     icon.run()
 
 

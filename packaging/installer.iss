@@ -28,8 +28,8 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Tasks]
-Name: "autostart"; Description: "Start with Windows (เปิดพร้อม Windows)"
-Name: "desktopicon"; Description: "Desktop shortcut (ไอคอนบนเดสก์ท็อป)"; Flags: unchecked
+Name: "autostart"; Description: "Start with Windows"
+Name: "desktopicon"; Description: "Desktop shortcut"; Flags: unchecked
 
 [Files]
 Source: "dist\MangaTVL-Companion\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -39,11 +39,11 @@ Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Registry]
-; same value as the tray menu's "เปิดพร้อม Windows" (apps/companion/tray.py RUN_NAME)
+; same value as the tray menu's "Start with Windows" (apps/companion/tray.py RUN_NAME)
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#AppName}"; ValueData: """{app}\{#AppExe}"""; Tasks: autostart; Flags: uninsdeletevalue
 
 [Run]
-Filename: "{app}\{#AppExe}"; Description: "Start MangaTVL Companion now (เปิดเลย)"; Flags: nowait postinstall
+Filename: "{app}\{#AppExe}"; Description: "Start MangaTVL Companion now"; Flags: nowait postinstall
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/im {#AppExe} /f"; Flags: runhidden; RunOnceId: "StopCompanion"

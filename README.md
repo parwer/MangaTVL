@@ -32,7 +32,7 @@ Download both files from the [latest release](https://github.com/parwer/MangaTVL
 ### 1. Companion app
 
 1. Run `MangaTVL-Companion-Setup-<version>.exe`. It installs for your user only, so it needs no admin rights and no Python.
-2. When it finishes, the app starts and shows an icon in the system tray. It loads its models on first start, which takes a few seconds.
+2. When it finishes, the app starts and shows an icon in the system tray. The icon is orange while the app loads its models (a few seconds) and turns green when it is ready.
 3. Optional: turn on the start-with-Windows option in the tray icon's menu.
 
 ### 2. Browser extension
@@ -45,17 +45,21 @@ Download both files from the [latest release](https://github.com/parwer/MangaTVL
 
 ### 3. Choose an AI
 
-Click the MangaTVL icon to open the popup. It should say the Companion app is ready. Then do one of these:
+Click the MangaTVL icon to open the popup. The box at the top tells you whether MangaTVL is ready, and how to fix anything that isn't (with a button for each fix). Then do one of these:
 
 - Click **Sign in with OpenRouter** and approve. The extension receives a key by itself.
-- Or open the advanced section and enter a Gemini API key.
-- Or run a local model (for example `ollama pull qwen3-vl:4b-instruct`) and choose **Local AI**.
+- Or open **Settings**, choose **Google Gemini** and paste a Gemini API key.
+- Or run a local model (for example `ollama pull qwen3-vl:4b-instruct`), open **Settings** and choose **Local AI on this PC**.
+
+With no AI connected, MangaTVL uses Chrome's built-in translator, which works offline but only sees the text.
 
 ## Use
 
 1. Open a chapter on a manga site.
-2. In the popup, pick the language of the pages (**from**) and the language you want (**to**), then click the button that turns MangaTVL on for that site. This shows the translate button on its pages.
-3. Click the floating button to translate the pages. You can also right-click an image and choose **Translate this image (MangaTVL)**.
+2. In the popup, pick the language of the pages (**From**) and the language you want (**To**).
+3. Click **Translate this page**. To keep a Translate button on a site's pages, turn on the switch for that site in the popup.
+4. The panel at the bottom-right shows how many pages are done and about how long is left. Each page shows a label with its current step. If a page fails, its label says why and has a **Retry** button.
+5. Click ↺ to see the original pages again. You can also right-click an image and choose **Translate this image (MangaTVL)**.
 
 ## Update
 
