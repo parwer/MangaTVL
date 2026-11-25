@@ -90,9 +90,16 @@ def main():
         pystray.MenuItem("Quit MangaTVL Companion", quit_app),
     )
     icon = pystray.Icon("MangaTVL", icon_image(state="loading"), "MangaTVL Companion: starting…", menu)
+    def shown(icon_):
+        icon_.visible = True
+        try:  # the app has no window: say where it went
+            icon_.notify("Running minimized in the system tray.", "MangaTVL Companion")
+        except Exception as e:  # notifications can be turned off; the icon is still there
+            print(f"start notification failed: {e!r}", flush=True)
+
     threading.Thread(target=srv.run, daemon=True).start()
     threading.Thread(target=load, daemon=True).start()
-    icon.run()
+    icon.run(setup=shown)
 
 
 if __name__ == "__main__":
