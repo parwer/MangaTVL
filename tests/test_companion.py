@@ -73,19 +73,9 @@ def test_builtin_translates_with_bing_in_the_app(monkeypatch):
     assert r["image"].startswith("data:image/webp;base64,") and stub.finished == [["สวัสดี", "ลาก่อน"]]
 
 
-def test_builtin_falls_back_to_the_offline_model_without_bing(monkeypatch):
+def test_builtin_without_bing_hands_text_to_the_extension(monkeypatch):
     c, stub = client(monkeypatch, ["HELLO", "BYE"])
     no_bing(monkeypatch)
-    monkeypatch.setattr(srv.offline_mt, "available", lambda: True)
-    monkeypatch.setattr(srv.offline_mt, "translate", lambda texts, f, t: [x.lower() for x in texts])
-    r = c.post("/v1/translate", json={"image": data_url(), "llm": {"provider": "none"}}, headers=EXT).json()
-    assert [b["text"] for b in r["bubbles"]] == ["hello", "bye"] and stub.finished == [["hello", "bye"]]
-
-
-def test_builtin_without_bing_or_offline_model_hands_text_to_the_extension(monkeypatch):
-    c, stub = client(monkeypatch, ["HELLO", "BYE"])
-    no_bing(monkeypatch)
-    monkeypatch.setattr(srv.offline_mt, "available", lambda: False)
     r = c.post("/v1/translate", json={"image": data_url(), "llm": {"provider": "builtin"}}, headers=EXT).json()
     assert r["needs_client_translation"] and [b["text"] for b in r["bubbles"]] == ["HELLO", "BYE"]
     out = c.post("/v1/render", json={"job": r["job"], "translations": ["สวัสดี", "ลาก่อน"]}, headers=EXT).json()

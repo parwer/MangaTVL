@@ -120,7 +120,7 @@ function llmConfig(s) {
       : { provider: "none", missing: "gemini" };
   if (mode === "local") return { provider: "local", model: s.modelLocal || null, base_url: s.localUrl || null };
   // relay off: free daily quota, no account (apps/relay)
-  return { provider: "builtin" }; // the app's offline model (an app without it: Chrome's Translator in content.js)
+  return { provider: "builtin" }; // Bing Translator in the app (when it fails: Chrome's Translator in content.js)
 }
 
 async function blobToDataURL(blob) {

@@ -18,7 +18,7 @@ The translation is done by an AI of your choice. It sees the page and the text, 
   - **OpenRouter**: one-click sign in, no API key to copy
   - **Gemini**: with your own API key
   - **Local AI**: Ollama, LM Studio or any OpenAI-compatible server on your PC; free and offline
-  - **Built-in translator** (the default): free, no account, in every browser. It uses Bing Translator online and a small offline model when there is no internet. It translates text only (it cannot see the page), and the text of the page's balloons is sent to Bing
+  - **Built-in translator** (the default): free, no account, in every browser. It uses Bing Translator, so it needs internet. It translates text only (it cannot see the page), and the text of the page's balloons is sent to Bing
 - Text-only mode for AI models that cannot read images
 - Runs on any graphics card (NVIDIA, AMD, Intel) through DirectML, and on PCs without one (slower)
 
@@ -51,7 +51,7 @@ Click the MangaTVL icon to open the popup. The box at the top tells you whether 
 - Or open **Settings**, choose **Google Gemini** and paste a Gemini API key.
 - Or run a local model (for example `ollama pull qwen3-vl:4b-instruct`), open **Settings** and choose **Local AI on this PC**.
 
-With no AI connected, MangaTVL uses its built-in translator: Bing Translator online, or a basic offline model without internet. It only sees the text.
+With no AI connected, MangaTVL uses its built-in translator: Bing Translator online. It only sees the text.
 
 ## Use
 

@@ -130,7 +130,7 @@
       text: "It couldn't load its models. Quit it from the tray icon and start it again. If that doesn't help, reinstall it.",
       actions: [retryStart, download("Reinstall")] },
     "builtin-missing": { title: "No translator available",
-      text: "This browser doesn't have Chrome's built-in translator. Connect an AI in MangaTVL (OpenRouter, Gemini or Local AI).",
+      text: "Couldn't reach Bing Translator. Check your internet connection, or connect an AI in MangaTVL (OpenRouter, Gemini or Local AI).",
       actions: [openSettings] },
     "builtin-pair": { title: "Language pair not supported",
       text: "Chrome's built-in translator can't translate between these two languages. Connect an AI in MangaTVL instead.",

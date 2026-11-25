@@ -21,9 +21,9 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from pipeline import QualityPipeline, glossary_words  # noqa: E402
 from manga_translator.schemas.interface import TranslationResult  # noqa: E402
-from manga_translator.translators import bing_web, offline_mt  # noqa: E402
+from manga_translator.translators import bing_web  # noqa: E402
 
-VERSION = "0.3.4"
+VERSION = "0.3.5"
 MODEL = os.getenv("MODEL") or "google/gemini-3-flash-preview"
 # MTVL_DEVICE, not DEVICE: the repo .env sets DEVICE=cpu for main.py, which put the companion's
 # glyph mask and LaMa on the CPU (minutes per page, the whole PC froze)
@@ -246,7 +246,6 @@ def health():
     # no GPU: each page takes about 30 s on the CPU and always runs at "fast" quality
     cpu_only = getattr(PIPE, "cpu_only", False) if PIPE is not None else (DEVICE == "cpu" or not gpu)
     return {"version": VERSION, "gpu": gpu, "cpu_only": cpu_only, "local_llm": ollama_ok(), "relay": False, "jobs": True,
-            "offline_mt": offline_mt.available(),
             "ready": not LOAD["loading"] and not LOAD["error"], "loading": LOAD["loading"], "load_error": LOAD["error"],
             "providers": ["openrouter", "gemini", "local", "builtin"]}
 
@@ -300,19 +299,12 @@ async def _translate_job(job: dict, llm: LLM, context: dict | None, send_image: 
     # relay off: zero-account tier
     # if prov == "relay" or (prov == "none" and relay_ok()):
     #     prov, key = "relay", relay_token()
-    if prov in ("none", "builtin"):  # free, no account: Bing Translator, else the app's own offline model
-        texts = None
+    if prov in ("none", "builtin"):  # free, no account: Bing Translator
         try:
             texts = await asyncio.to_thread(bing_web.translate, [o.text for o in page.ocr], job["src"], job["to_lang"])
-        except Exception as e:  # no internet, or Bing changed or refused
-            print(f"built-in translator: Bing failed ({e}); using the offline model", flush=True)
-        if texts is None:
-            if not offline_mt.available():  # an app built without it: Chrome's on-device Translator in the extension
-                return {"needs_client_translation": True, "context": context}
-            try:
-                texts = await asyncio.to_thread(offline_mt.translate, [o.text for o in page.ocr], job["src"], job["to_lang"])
-            except Exception as e:
-                raise HTTPException(502, f"offline translator: {e}") from e
+        except Exception as e:  # no internet, or Bing changed or refused: Chrome's on-device Translator in the extension
+            print(f"built-in translator: Bing failed ({e}); handing the text to the browser", flush=True)
+            return {"needs_client_translation": True, "context": context}
         results = [TranslationResult(ocr_result=o, translated_text=t) for o, t in zip(page.ocr, texts)]
         _start_render(job, results)
         return {"context": context, "bubbles": [{"n": n, "speaker": "", "text": t} for n, t in enumerate(texts)]}
