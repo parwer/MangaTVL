@@ -5,101 +5,124 @@
 </head><body>
 <main>
  <header>
-  <img src="icons/icon48.png" alt="" width="28" height="28">
+  <img src="icons/icon48.png" alt="" width="26" height="26">
   <h1>MangaTVL</h1>
-  <span id="version" class="chip"></span>
+  <span id="status" class="pill" data-tone="busy" aria-live="polite"><i aria-hidden="true"></i><span id="status-title">Checking…</span></span>
  </header>
 
- <!-- is everything in place, and what to do if not -->
- <section id="status" class="card status" data-tone="busy" aria-live="polite">
-  <div class="status-head"><span class="status-icon" aria-hidden="true"></span><div>
-   <h2 id="status-title">Checking…</h2><p id="status-text"></p></div></div>
+ <section id="tab-home" class="tab">
+  <div class="row" id="c-site">
+   <span class="label"><b></b></span>
+   <label class="switch"><input id="site" type="checkbox"><span></span></label>
+  </div>
+  <div class="row">
+   <span class="label">From</span>
+   <select id="fromLang" aria-label="Language of the pages"><option value="english">English</option><option value="japanese">Japanese</option><option value="korean">Korean</option><option value="chinese">Chinese (Simplified)</option><option value="chinese_traditional">Chinese (Traditional)</option><option value="thai">Thai</option><option value="vietnamese">Vietnamese</option><option value="indonesian">Indonesian</option><option value="french">French</option><option value="german">German</option><option value="spanish">Spanish</option><option value="italian">Italian</option><option value="portuguese">Portuguese</option><option value="russian">Russian</option></select>
+  </div>
+  <div class="row">
+   <span class="label">To <button id="swap" class="icon-btn" title="Swap languages" aria-label="Swap languages">⇅</button></span>
+   <select id="toLang" aria-label="Translate into"><option value="thai">Thai</option><option value="english">English</option><option value="japanese">Japanese</option><option value="korean">Korean</option><option value="chinese">Chinese (Simplified)</option><option value="chinese_traditional">Chinese (Traditional)</option><option value="vietnamese">Vietnamese</option><option value="indonesian">Indonesian</option><option value="french">French</option><option value="german">German</option><option value="spanish">Spanish</option><option value="italian">Italian</option><option value="portuguese">Portuguese</option><option value="russian">Russian</option></select>
+  </div>
+
+  <!-- is everything in place, and what to do if not -->
   <ul class="checks">
    <li id="c-app"><span class="mark" aria-hidden="true"></span><div class="what"><b></b><small></small><div class="fix"></div></div></li>
    <li id="c-ai"><span class="mark" aria-hidden="true"></span><div class="what"><b></b><small></small><div class="fix"></div></div></li>
-   <li id="c-site"><span class="mark" aria-hidden="true"></span><div class="what"><b></b><small></small></div>
-    <label class="switch"><input id="site" type="checkbox"><span></span></label></li>
   </ul>
+
+  <button id="translate" class="primary big">Translate this page</button>
+  <p class="hint center" id="translateHint"></p>
+  <footer>
+   <a href="https://github.com/parwer/MangaTVL#use" target="_blank" rel="noopener">Help</a>
+   <span>•</span>
+   <a href="https://github.com/parwer/MangaTVL/releases/latest" target="_blank" rel="noopener">Get the app</a>
+  </footer>
  </section>
 
- <section class="card">
-  <h3>Languages</h3>
-  <div class="langs">
-   <label class="field"><span>From</span>
-    <select id="fromLang" aria-label="Language of the pages"><option value="english">English</option><option value="japanese">Japanese</option><option value="korean">Korean</option><option value="chinese">Chinese (Simplified)</option><option value="chinese_traditional">Chinese (Traditional)</option><option value="thai">Thai</option><option value="vietnamese">Vietnamese</option><option value="indonesian">Indonesian</option><option value="french">French</option><option value="german">German</option><option value="spanish">Spanish</option><option value="italian">Italian</option><option value="portuguese">Portuguese</option><option value="russian">Russian</option></select></label>
-   <button id="swap" class="icon-btn" title="Swap languages" aria-label="Swap languages">⇄</button>
-   <label class="field"><span>To</span>
-    <select id="toLang" aria-label="Translate into"><option value="thai">Thai</option><option value="english">English</option><option value="japanese">Japanese</option><option value="korean">Korean</option><option value="chinese">Chinese (Simplified)</option><option value="chinese_traditional">Chinese (Traditional)</option><option value="vietnamese">Vietnamese</option><option value="indonesian">Indonesian</option><option value="french">French</option><option value="german">German</option><option value="spanish">Spanish</option><option value="italian">Italian</option><option value="portuguese">Portuguese</option><option value="russian">Russian</option></select></label>
-  </div>
+ <section id="tab-settings" class="tab" hidden>
+  <details class="sec" id="sec-ai" open>
+   <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2z"/></svg><b>AI service</b></summary>
+   <div class="row">
+    <span class="label">Service</span>
+    <select id="llmMode">
+     <option value="builtin">Built-in (free)</option>
+     <option value="openrouter">OpenRouter</option>
+     <option value="gemini">Google Gemini</option>
+     <option value="local">Local AI</option>
+    </select>
+   </div>
 
-  <h3>Translation style</h3>
-  <div class="seg" role="radiogroup" data-field="contextMode">
-   <button role="radio" data-value="chapter">Story mode</button>
-   <button role="radio" data-value="page">Fast mode</button>
+   <div id="p-openrouter">
+    <div class="row">
+     <span class="label">Account <span id="or-state" class="chip"></span></span>
+     <span class="btns"><button id="or-out" class="ghost small">Disconnect</button><button id="signin" class="primary small">Sign in</button></span>
+    </div>
+    <p class="hint" id="or-msg" aria-live="polite"></p>
+   </div>
+
+   <div id="p-gemini">
+    <div class="row">
+     <span class="label">API key <span id="gm-state" class="chip"></span></span>
+     <input id="geminiKey" type="password" autocomplete="off">
+    </div>
+    <div class="row slim">
+     <a class="link" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key</a>
+     <button id="gm-out" class="ghost small">Remove key</button>
+    </div>
+   </div>
+
+   <div id="p-local">
+    <div class="row">
+     <span class="label">Server</span>
+     <input id="localUrl" placeholder="Ollama (default)" title="Blank = Ollama (http://127.0.0.1:11434/v1). LM Studio: http://127.0.0.1:1234/v1">
+    </div>
+    <div class="row slim">
+     <span class="hint" id="localInfo" aria-live="polite"></span>
+     <button id="checkLocal" class="ghost small">Test</button>
+    </div>
+   </div>
+
+   <div id="modelBox">
+    <div class="row">
+     <span class="label" id="modelLabel">Model</span>
+     <input id="modelText"><select id="modelLocal"></select>
+    </div>
+    <p class="hint" id="modelHint"></p>
+   </div>
+  </details>
+
+  <details class="sec" id="sec-tr">
+   <summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><b>Translation</b></summary>
+   <div class="row">
+    <span class="label">Style</span>
+    <div class="seg" role="radiogroup" data-field="contextMode">
+     <button role="radio" data-value="chapter">Story</button>
+     <button role="radio" data-value="page">Fast</button>
+    </div>
+   </div>
+   <div class="row">
+    <span class="label">Image cleanup</span>
+    <select id="quality"><option value="best">Best</option><option value="fast">Fast</option></select>
+   </div>
+   <div class="row">
+    <span class="label">AI sees</span>
+    <select id="llmInput" title="Text only: for AI models that cannot read images"><option value="image">Page + text</option><option value="text">Text only</option></select>
+   </div>
+   <!-- relay off: a "Relay server" field went here -->
+  </details>
+
+  <div class="row plain">
+   <span class="label">Version</span>
+   <span id="version" class="muted"></span>
   </div>
-  <p class="hint" id="contextHint"></p>
  </section>
 
- <button id="translate" class="primary big">Translate this page</button>
- <p class="hint center" id="translateHint">Tip: right-click any image and choose <b>Translate this image</b>.</p>
-
- <details id="settings" class="card">
-  <summary><span>Settings</span><small>AI service, quality</small></summary>
-
-  <h3>AI service</h3>
-  <label class="field"><span>Which AI translates</span>
-   <select id="llmMode">
-    <option value="builtin">Built-in translator (free, no account)</option>
-    <option value="openrouter">OpenRouter</option>
-    <option value="gemini">Google Gemini</option>
-    <option value="local">Local AI on this PC</option>
-   </select></label>
-  <p class="hint" id="llmHint"></p>
-
-  <div class="provider" id="p-openrouter">
-   <div class="provider-head"><b>OpenRouter</b><span id="or-state" class="chip"></span></div>
-   <p class="hint">Sign in once and MangaTVL gets its own key. Nothing to copy or paste.</p>
-   <div class="btns"><button id="signin" class="primary">Sign in with OpenRouter</button>
-    <button id="or-out" class="ghost">Disconnect</button></div>
-   <p class="hint" id="or-msg" aria-live="polite"></p>
-  </div>
-
-  <div class="provider" id="p-gemini">
-   <div class="provider-head"><b>Google Gemini</b><span id="gm-state" class="chip"></span></div>
-   <label class="field"><span>API key</span><input id="geminiKey" type="password" autocomplete="off" placeholder="Paste your key (starts with AIza)"></label>
-   <div class="btns"><a class="link" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Get a free key</a>
-    <button id="gm-out" class="ghost small">Remove key</button></div>
-  </div>
-
-  <div class="provider" id="p-local">
-   <div class="provider-head"><b>Local AI</b></div>
-   <p class="hint">Free and private: Ollama, LM Studio or any OpenAI-compatible server on your PC.</p>
-   <label class="field"><span>Server address</span><input id="localUrl" placeholder="Blank = Ollama (http://127.0.0.1:11434/v1)"></label>
-   <small class="hint">LM Studio: http://127.0.0.1:1234/v1</small>
-   <div class="btns"><button id="checkLocal" class="ghost">Test connection</button></div>
-   <p class="hint" id="localInfo" aria-live="polite"></p>
-  </div>
-
-  <div class="provider" id="modelBox">
-   <label class="field"><span id="modelLabel">Model</span>
-    <input id="modelText"><select id="modelLocal"></select></label>
-   <p class="hint" id="modelHint"></p>
-  </div>
-
-  <h3>Quality</h3>
-  <label class="field"><span>Image cleanup</span>
-   <select id="quality"><option value="best">Best (cleanest result)</option><option value="fast">Fast (quicker, simpler cleanup)</option></select></label>
-  <label class="field"><span>What the AI sees</span>
-   <select id="llmInput"><option value="image">Page and text (more accurate)</option><option value="text">Text only (for AI without image support, uses less)</option></select></label>
-  <!-- relay off: a "Relay server" field went here -->
-  <p class="hint center" id="saved" aria-live="polite">Changes save automatically.</p>
- </details>
-
- <footer>
-  <a href="https://github.com/parwer/MangaTVL#use" target="_blank" rel="noopener">Help</a>
-  <span>·</span>
-  <a href="https://github.com/parwer/MangaTVL/releases/latest" target="_blank" rel="noopener">Get the Companion app</a>
- </footer>
+ <nav role="tablist">
+  <button role="tab" data-tab="home" aria-selected="true" title="Translate" aria-label="Translate">
+   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7l-5 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg></button>
+  <button role="tab" data-tab="settings" aria-selected="false" title="Settings" aria-label="Settings">
+   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.5 7.5 0 0 0-1.700-1L15 3.500h-4l-.3 2.500a7.500 7.500 0 0 0-1.700 1l-2.400-1-2 3.400 2 1.600a7.600 7.600 0 0 0 0 2l-2 1.600 2 3.400 2.400-1a7.500 7.500 0 0 0 1.700 1l.3 2.500h4l.300-2.500a7.500 7.500 0 0 0 1.700-1l2.400 1 2-3.400zM13 15.200a3.200 3.200 0 1 1 0-6.400 3.200 3.200 0 0 1 0 6.400z" transform="translate(-1)"/></svg></button>
+ </nav>
 </main>
 <script src="popup.js"></script>
 </body></html>
